@@ -371,11 +371,95 @@ app.get('/download', async (req, res) => {
 
     const downloadLinks = [];
 
+    // Extract the direct download link from #link element
+    const linkElement = $('#link');
+    
+    if (linkElement.length > 0) {
+      const rawLink = linkElement.attr('href');
+      if (rawLink && rawLink.includes('google.com/server')) {
+        const directUrl = transformDownloadUrl(rawLink);
+        downloadLinks.push({
+          type: 'direct',
+          label: 'Direct Download',
+          raw_url: rawLink,
+          download_url: directUrl
+        });
+      }
+    }
+
+    // Extract file info
+    const bodyText = $('body').text();
+    const fileName = bodyText.match(/CineSubz\.com[^\n]+\.(mp4|mkv)/)?.[0] || 'video.mp4';
+    const fileSize = bodyText.match(/(\d+\.?\d*\s*(?:GB|MB))/i)?.[1] || 'Unknown';
+
+    if (downloadLinks.length > 0) {
+      res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: true,
+        countdown_url: url,
+        file_info: {
+          name: fileName,
+          size: fileSize
+        },
+        total_links: 1,
+        download_options: downloadLinks,
+        additional_info: {
+          message: 'Direct download link is available. Google Drive and Telegram mirrors can be accessed by visiting the countdown page in a browser.',
+          alternative_downloads: [
+            {
+              type: 'google_drive',
+              label: 'Google Drive Mirror',
+              access_method: 'Visit countdown page → Wait for countdown → Click Google Download button'
+            },
+            {
+              type: 'telegram',
+              label: 'Telegram Channel',
+              access_method: 'Visit countdown page → Wait for countdown → Click Telegram Download button'
+            }
+          ]
+        }
+      });
+    } else {
+      res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: false,
+        countdown_url: url,
+        message: 'Could not extract download link from countdown page.',
+        troubleshooting: {
+          reason: 'The page uses JavaScript-based protection and dynamic loading',
+          solution: 'Visit the countdown page directly in a browser, wait for the countdown to finish, then manually copy the download link'
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Download error:', error.message);
+    res.status(500).json({ 
+      error: 'Failed to resolve download link', 
+      message: error.message
+    });
+  }
+});
+  try {
+    const url = req.query.url;
+    if (!url) {
+      return res.status(400).json({ error: 'Missing URL parameter' });
+    }
+
+    const response = await axios.get(url, { 
+      headers,
+      maxRedirects: 5
+    });
+    const $ = cheerio.load(response.data);
+
+    const downloadLinks = [];
+
     // Method 1: Extract from #link element (main direct link)
     const linkElement = $('#link');
     if (linkElement.length > 0) {
       const rawLink = linkElement.attr('href');
-      if (rawLink) {
+      if (rawLink && rawLink.includes('google.com/server')) {
         downloadLinks.push({
           type: 'direct',
           label: 'Direct Download',
@@ -385,54 +469,86 @@ app.get('/download', async (req, res) => {
       }
     }
 
-    // Method 2: Find all download buttons
-    $('.download-btn, .btn-download, a[href*="google.com/server"], a[href*="sonic-cloud"]').each((i, el) => {
+    // Method 2: Look for the countdown page structure specifically
+    // CineSubz uses a specific pattern with download buttons after countdown
+    $('.wait-done, .download-options, .dwnl-link, .link-holder').each((i, el) => {
+      $(el).find('a').each((j, linkEl) => {
+        const $link = $(linkEl);
+        const href = $link.attr('href');
+        const text = $link.text().trim();
+        
+        if (href) {
+          if (href.includes('google.com/server')) {
+            downloadLinks.push({
+              type: 'direct',
+              label: text || 'Direct Download',
+              raw_url: href,
+              download_url: transformDownloadUrl(href)
+            });
+          } else if (href.includes('drive.google.com')) {
+            downloadLinks.push({
+              type: 'google_drive',
+              label: text || 'Google Drive',
+              raw_url: href,
+              download_url: href
+            });
+          } else if (href.includes('t.me') && !href.includes('Admin')) {
+            downloadLinks.push({
+              type: 'telegram',
+              label: text || 'Telegram Download',
+              raw_url: href,
+              download_url: href
+            });
+          } else if (href.includes('mega.nz')) {
+            downloadLinks.push({
+              type: 'mega',
+              label: text || 'Mega Download',
+              raw_url: href,
+              download_url: href
+            });
+          }
+        }
+      });
+    });
+
+    // Method 3: Find all buttons with specific patterns
+    $('a.btn, a.button, button a, .download-btn a, [class*="download"] a').each((i, el) => {
       const $el = $(el);
       const href = $el.attr('href');
       const text = $el.text().trim();
-      
-      if (href && href.includes('google.com/server')) {
-        downloadLinks.push({
-          type: 'direct',
-          label: text || 'Direct Download',
-          raw_url: href,
-          download_url: transformDownloadUrl(href)
-        });
-      }
-    });
-
-    // Method 3: Extract Google Drive, Telegram, Mega links
-    $('a').each((i, el) => {
-      const $el = $(el);
-      const href = $el.attr('href');
-      const text = $el.text().trim().toLowerCase();
+      const classes = $el.attr('class') || '';
       
       if (href) {
-        // Google Drive links
-        if (href.includes('drive.google.com') || text.includes('google')) {
+        // Skip admin links
+        if (href.includes('Admin') || text.toLowerCase().includes('admin')) {
+          return;
+        }
+
+        if (href.includes('google.com/server')) {
+          downloadLinks.push({
+            type: 'direct',
+            label: text || 'Direct Download',
+            raw_url: href,
+            download_url: transformDownloadUrl(href)
+          });
+        } else if (href.includes('drive.google.com')) {
           downloadLinks.push({
             type: 'google_drive',
-            label: $el.text().trim() || 'Google Drive',
+            label: text || 'Google Drive',
             raw_url: href,
             download_url: href
           });
-        }
-        
-        // Telegram links
-        if (href.includes('t.me') || text.includes('telegram')) {
+        } else if (href.includes('t.me')) {
           downloadLinks.push({
             type: 'telegram',
-            label: $el.text().trim() || 'Telegram Download',
+            label: text || 'Telegram Channel',
             raw_url: href,
             download_url: href
           });
-        }
-        
-        // Mega links
-        if (href.includes('mega.nz') || text.includes('mega')) {
+        } else if (href.includes('mega.nz')) {
           downloadLinks.push({
             type: 'mega',
-            label: $el.text().trim() || 'Mega Download',
+            label: text || 'Mega Download',
             raw_url: href,
             download_url: href
           });
@@ -440,80 +556,60 @@ app.get('/download', async (req, res) => {
       }
     });
 
-    // Method 4: Check for data attributes or onclick handlers
-    $('[data-link], [data-url], [onclick*="window.open"]').each((i, el) => {
-      const $el = $(el);
-      const dataLink = $el.attr('data-link') || $el.attr('data-url');
-      const onclick = $el.attr('onclick');
-      
-      if (dataLink) {
-        const type = dataLink.includes('google') ? 'google_drive' : 
-                     dataLink.includes('telegram') || dataLink.includes('t.me') ? 'telegram' : 
-                     dataLink.includes('mega') ? 'mega' : 'direct';
-        
+    // Method 4: Check for links in text/scripts that might be dynamically loaded
+    const pageText = $.html();
+    
+    // Find Google Drive links
+    const driveMatches = pageText.match(/https?:\/\/drive\.google\.com\/[^\s"'<>]+/g);
+    if (driveMatches) {
+      driveMatches.forEach((match, idx) => {
         downloadLinks.push({
-          type: type,
-          label: $el.text().trim() || type.replace('_', ' '),
-          raw_url: dataLink,
-          download_url: type === 'direct' ? transformDownloadUrl(dataLink) : dataLink
+          type: 'google_drive',
+          label: `Google Drive ${idx + 1}`,
+          raw_url: match,
+          download_url: match
         });
-      }
-      
+      });
+    }
+
+    // Find Mega links
+    const megaMatches = pageText.match(/https?:\/\/mega\.nz\/[^\s"'<>]+/g);
+    if (megaMatches) {
+      megaMatches.forEach((match, idx) => {
+        downloadLinks.push({
+          type: 'mega',
+          label: `Mega Download ${idx + 1}`,
+          raw_url: match,
+          download_url: match
+        });
+      });
+    }
+
+    // Find additional Telegram links (not admin)
+    const telegramMatches = pageText.match(/https?:\/\/t\.me\/[^\s"'<>]+/g);
+    if (telegramMatches) {
+      telegramMatches.forEach(match => {
+        if (!match.includes('Admin')) {
+          downloadLinks.push({
+            type: 'telegram',
+            label: 'Telegram Channel',
+            raw_url: match,
+            download_url: match
+          });
+        }
+      });
+    }
+
+    // Method 5: Look for onclick handlers
+    $('[onclick]').each((i, el) => {
+      const onclick = $(el).attr('onclick');
       if (onclick) {
         const urlMatch = onclick.match(/['"]([^'"]+)['"]/);
         if (urlMatch && urlMatch[1]) {
-          downloadLinks.push({
-            type: 'unknown',
-            label: $el.text().trim() || 'Download',
-            raw_url: urlMatch[1],
-            download_url: urlMatch[1]
-          });
-        }
-      }
-    });
-
-    // Remove duplicates
-    const uniqueLinks = [];
-    const seen = new Set();
-    
-    for (const link of downloadLinks) {
-      const key = link.download_url;
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueLinks.push(link);
-      }
-    }
-
-    if (uniqueLinks.length > 0) {
-      res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        countdown_url: url,
-        total_links: uniqueLinks.length,
-        download_options: uniqueLinks
-      });
-    } else {
-      res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: false,
-        countdown_url: url,
-        message: 'Could not extract download links. The page structure may have changed.'
-      });
-    }
-  } catch (error) {
-    console.error('Download error:', error.message);
-    res.status(500).json({ error: 'Failed to resolve download link', message: error.message });
-  }
-});
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ CineSubz API running at http://0.0.0.0:${PORT}`);
-  console.log('📋 Endpoints:');
-  console.log('  GET /              - API info');
-  console.log('  GET /search?q=     - Search movies/TV shows');
-  console.log('  GET /details?url=  - Get movie/show details');
-  console.log('  GET /episodes?url= - Get TV show episodes');
-  console.log('  GET /download?url= - Resolve countdown page to get all download links');
-});
+          const url = urlMatch[1];
+          const text = $(el).text().trim();
+          
+          if (url.includes('google.com/server')) {
+            downloadLinks.push({
+              type: 'direct',
+              label: text || 'Direct D
