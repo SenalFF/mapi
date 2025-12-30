@@ -3,7 +3,7 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 const BASE_URL = 'https://cinesubz.co';
 
 const API_INFO = {
@@ -13,10 +13,20 @@ const API_INFO = {
 };
 
 const headers = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-  'Accept-Language': 'en-US,en;q=0.5',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Cache-Control': 'max-age=0',
   'Connection': 'keep-alive',
+  'Referer': 'https://cinesubz.co/',
+  'Sec-Ch-Ua': '"Not A(Brand";v="99", "Google Chrome";v="121", "Chromium";v="121"',
+  'Sec-Ch-Ua-Mobile': '?0',
+  'Sec-Ch-Ua-Platform': '"Windows"',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'same-origin',
+  'Sec-Fetch-User': '?1',
+  'Upgrade-Insecure-Requests': '1'
 };
 
 app.use(express.json());
@@ -320,63 +330,6 @@ app.get('/episodes', async (req, res) => {
   }
 });
 
-app.get('/episode-details', async (req, res) => {
-  try {
-    const url = req.query.url;
-    if (!url) {
-      return res.status(400).json({ error: 'Missing URL parameter' });
-    }
-
-    const response = await axios.get(url, { headers });
-    const $ = cheerio.load(response.data);
-
-    const title = $('.sheader .data h1').text().trim() || $('h1').first().text().trim();
-    const poster = $('.sheader .poster img').attr('src') || $('img.poster').attr('src');
-
-    const downloadLinks = [];
-
-    $('#download tbody tr').each((i, el) => {
-      const $row = $(el);
-      const quality = $row.find('td').eq(1).text().trim();
-      const size = $row.find('td').eq(2).text().trim();
-      const link = $row.find('a').attr('href');
-
-      if (link) {
-        downloadLinks.push({
-          quality: quality || 'Unknown',
-          size,
-          url: link
-        });
-      }
-    });
-
-    $('.sp-body a, .dload a, .download a').each((i, el) => {
-      const $el = $(el);
-      const href = $el.attr('href');
-      const text = $el.text().trim();
-      
-      if (href && href.includes('cinesubz')) {
-        const qualityMatch = text.match(/(480p|720p|1080p|2160p)/i);
-        downloadLinks.push({
-          quality: qualityMatch ? qualityMatch[1] : 'Unknown',
-          text: text.substring(0, 100),
-          url: href
-        });
-      }
-    });
-
-    res.json({
-      title,
-      poster,
-      url,
-      downloadLinks: [...new Map(downloadLinks.filter(l => l.url).map(l => [l.url, l])).values()]
-    });
-  } catch (error) {
-    console.error('Episode details error:', error.message);
-    res.status(500).json({ error: 'Failed to get episode details', message: error.message });
-  }
-});
-
 const urlMappings = [
   { search: ['https://google.com/server11/1:/', 'https://google.com/server12/1:/', 'https://google.com/server13/1:/'], replace: 'https://cloud.sonic-cloud.online/server1/' },
   { search: ['https://google.com/server21/1:/', 'https://google.com/server22/1:/', 'https://google.com/server23/1:/'], replace: 'https://cloud.sonic-cloud.online/server2/' },
@@ -389,24 +342,28 @@ function transformDownloadUrl(originalUrl) {
   let modifiedUrl = originalUrl;
   
   for (const mapping of urlMappings) {
+    let match = false;
     for (const searchUrl of mapping.search) {
       if (originalUrl.includes(searchUrl)) {
         modifiedUrl = originalUrl.replace(searchUrl, mapping.replace);
-        
-        if (modifiedUrl.includes('.mp4?bot=cscloud2bot&code=')) {
-          modifiedUrl = modifiedUrl.replace('.mp4?bot=cscloud2bot&code=', '?ext=mp4&bot=cscloud2bot&code=');
-        } else if (modifiedUrl.includes('.mp4')) {
-          modifiedUrl = modifiedUrl.replace('.mp4', '?ext=mp4');
-        } else if (modifiedUrl.includes('.mkv?bot=cscloud2bot&code=')) {
-          modifiedUrl = modifiedUrl.replace('.mkv?bot=cscloud2bot&code=', '?ext=mkv&bot=cscloud2bot&code=');
-        } else if (modifiedUrl.includes('.mkv')) {
-          modifiedUrl = modifiedUrl.replace('.mkv', '?ext=mkv');
-        } else if (modifiedUrl.includes('.zip')) {
-          modifiedUrl = modifiedUrl.replace('.zip', '?ext=zip');
-        }
-        
-        return modifiedUrl;
+        match = true;
+        break;
       }
+    }
+    
+    if (match) {
+      if (modifiedUrl.includes(".mp4?bot=cscloud2bot&code=")) {
+        modifiedUrl = modifiedUrl.replace(".mp4?bot=cscloud2bot&code=", "?ext=mp4&bot=cscloud2bot&code=");
+      } else if (modifiedUrl.includes(".mp4")) {
+        modifiedUrl = modifiedUrl.replace(".mp4", "?ext=mp4");
+      } else if (modifiedUrl.includes(".mkv?bot=cscloud2bot&code=")) {
+        modifiedUrl = modifiedUrl.replace(".mkv?bot=cscloud2bot&code=", "?ext=mkv&bot=cscloud2bot&code=");
+      } else if (modifiedUrl.includes(".mkv")) {
+        modifiedUrl = modifiedUrl.replace(".mkv", "?ext=mkv");
+      } else if (modifiedUrl.includes(".zip")) {
+        modifiedUrl = modifiedUrl.replace(".zip", "?ext=zip");
+      }
+      break;
     }
   }
   
@@ -420,134 +377,68 @@ app.get('/download', async (req, res) => {
       return res.status(400).json({ error: 'Missing URL parameter' });
     }
 
-    const response = await axios.get(url, { 
-      headers,
-      maxRedirects: 5
-    });
+    const response = await axios.get(url, { headers, timeout: 10000, maxRedirects: 5 });
     const $ = cheerio.load(response.data);
 
-    let finalLink = null;
-    let rawLink = null;
-
-    const linkElement = $('#link');
-    if (linkElement.length > 0) {
-      rawLink = linkElement.attr('href');
-    }
-
-    if (!rawLink) {
-      $('.wait-done a').each((i, el) => {
-        const href = $(el).attr('href');
-        if (href && href.includes('google.com/server')) {
-          rawLink = href;
-          return false;
-        }
-      });
-    }
-
-    if (!rawLink) {
-      $('a').each((i, el) => {
-        const href = $(el).attr('href');
-        if (href && (href.includes('google.com/server') || href.includes('cscloud') || href.includes('sonic-cloud') || href.includes('.mp4'))) {
-          rawLink = href;
-          return false;
-        }
-      });
-    }
-
-    if (rawLink) {
-      finalLink = transformDownloadUrl(rawLink);
-    }
-
-    if (!finalLink) {
-      const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
+    const downloadOptions = [];
+    
+    // Primary extraction from buttons based on UI
+    $('.download-section a, #dl-links a, .button, .wait-done a').each((i, el) => {
+      const $btn = $(el);
+      const href = $btn.attr('href');
+      const text = $btn.text().trim().toLowerCase();
       
-      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:cscloud|sonic-cloud|drive)[^"'\s<>]+/i);
-      if (linkMatch) {
-        finalLink = linkMatch[0];
+      if (href && !href.startsWith('#') && !href.includes('javascript:')) {
+        if (text.includes('direct download') || href.includes('cloud.sonic-cloud.online') || href.includes('google.com/server')) {
+          downloadOptions.push({
+            type: 'direct',
+            label: 'Direct Download',
+            raw_url: href,
+            download_url: transformDownloadUrl(href)
+          });
+        } else if (text.includes('google download') || href.includes('drive.google.com')) {
+          downloadOptions.push({
+            type: 'google',
+            label: text.includes('1') ? 'Google Download 1' : 'Google Download 2',
+            raw_url: href,
+            download_url: href
+          });
+        } else if (text.includes('telegram') || href.includes('t.me/')) {
+          downloadOptions.push({
+            type: 'telegram',
+            label: 'Telegram Download',
+            raw_url: href,
+            download_url: href
+          });
+        }
       }
-    }
+    });
 
-    if (finalLink) {
-      res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        
-        countdown_url: url,
-        raw_link: rawLink,
-        download_url: finalLink
-      });
-    } else {
-      res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: false,
-        
-        countdown_url: url,
-        message: 'Could not extract download link. The page structure may have changed.'
-      });
-    }
+    // Extract file info
+    const bodyText = $('body').text();
+    const fileName = $('title').text().replace('CineSubz.com - ', '').trim() || 
+                     bodyText.match(/CineSubz\.com[^\n]+\.(mp4|mkv|zip)/)?.[0] || 
+                     'video.mp4';
+    const fileSize = bodyText.match(/(\d+\.?\d*\s*(?:GB|MB))/i)?.[1] || 'Unknown';
+
+    res.json({
+      developer: API_INFO.developer,
+      version: API_INFO.version,
+      success: downloadOptions.length > 0,
+      countdown_url: url,
+      total_links: downloadOptions.length,
+      download_options: downloadOptions,
+      file_info: {
+        name: fileName,
+        size: fileSize
+      }
+    });
   } catch (error) {
     console.error('Download error:', error.message);
     res.status(500).json({ error: 'Failed to resolve download link', message: error.message });
   }
 });
 
-app.get('/resolve', async (req, res) => {
-  try {
-    const url = req.query.url;
-    if (!url) {
-      return res.status(400).json({ error: 'Missing URL parameter' });
-    }
-
-    const response = await axios.get(url, { 
-      headers,
-      maxRedirects: 0,
-      validateStatus: (status) => status < 400 || status === 302 || status === 301
-    });
-
-    const location = response.headers.location;
-    
-    if (location) {
-      res.json({
-        success: true,
-        originalUrl: url,
-        redirectUrl: location
-      });
-    } else {
-      const $ = cheerio.load(response.data);
-      const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
-      
-      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:cscloud|drive)[^"'\s<>]+/i);
-      
-      res.json({
-        success: !!linkMatch,
-        originalUrl: url,
-        extractedLink: linkMatch ? linkMatch[0] : null
-      });
-    }
-  } catch (error) {
-    if (error.response && error.response.headers.location) {
-      res.json({
-        success: true,
-        originalUrl: req.query.url,
-        redirectUrl: error.response.headers.location
-      });
-    } else {
-      console.error('Resolve error:', error.message);
-      res.status(500).json({ error: 'Failed to resolve URL', message: error.message });
-    }
-  }
-});
-
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`CineSubz API running at http://0.0.0.0:${PORT}`);
-  console.log('Endpoints:');
-  console.log('  GET /              - API info');
-  console.log('  GET /search?q=     - Search movies/TV shows');
-  console.log('  GET /details?url=  - Get movie/show details');
-  console.log('  GET /episodes?url= - Get TV show episodes');
-  console.log('  GET /episode-details?url= - Get episode download links');
-  console.log('  GET /download?url= - Resolve countdown page');
-  console.log('  GET /resolve?url=  - Follow redirects');
+  console.log(`API running on port ${PORT}`);
 });
