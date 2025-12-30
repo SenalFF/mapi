@@ -48,7 +48,7 @@ app.get('/', (req, res) => {
       download: {
         method: 'GET',
         path: '/download?url={countdown_page_url}',
-        description: 'Resolve countdown page to get final download link',
+        description: 'Resolve countdown page to get final download links',
         example: '/download?url=https://cinesubz.co/api-.../odcemnd9hb/'
       }
     }
@@ -320,63 +320,6 @@ app.get('/episodes', async (req, res) => {
   }
 });
 
-app.get('/episode-details', async (req, res) => {
-  try {
-    const url = req.query.url;
-    if (!url) {
-      return res.status(400).json({ error: 'Missing URL parameter' });
-    }
-
-    const response = await axios.get(url, { headers });
-    const $ = cheerio.load(response.data);
-
-    const title = $('.sheader .data h1').text().trim() || $('h1').first().text().trim();
-    const poster = $('.sheader .poster img').attr('src') || $('img.poster').attr('src');
-
-    const downloadLinks = [];
-
-    $('#download tbody tr').each((i, el) => {
-      const $row = $(el);
-      const quality = $row.find('td').eq(1).text().trim();
-      const size = $row.find('td').eq(2).text().trim();
-      const link = $row.find('a').attr('href');
-
-      if (link) {
-        downloadLinks.push({
-          quality: quality || 'Unknown',
-          size,
-          url: link
-        });
-      }
-    });
-
-    $('.sp-body a, .dload a, .download a').each((i, el) => {
-      const $el = $(el);
-      const href = $el.attr('href');
-      const text = $el.text().trim();
-      
-      if (href && href.includes('cinesubz')) {
-        const qualityMatch = text.match(/(480p|720p|1080p|2160p)/i);
-        downloadLinks.push({
-          quality: qualityMatch ? qualityMatch[1] : 'Unknown',
-          text: text.substring(0, 100),
-          url: href
-        });
-      }
-    });
-
-    res.json({
-      title,
-      poster,
-      url,
-      downloadLinks: [...new Map(downloadLinks.filter(l => l.url).map(l => [l.url, l])).values()]
-    });
-  } catch (error) {
-    console.error('Episode details error:', error.message);
-    res.status(500).json({ error: 'Failed to get episode details', message: error.message });
-  }
-});
-
 const urlMappings = [
   { search: ['https://google.com/server11/1:/', 'https://google.com/server12/1:/', 'https://google.com/server13/1:/'], replace: 'https://cloud.sonic-cloud.online/server1/' },
   { search: ['https://google.com/server21/1:/', 'https://google.com/server22/1:/', 'https://google.com/server23/1:/'], replace: 'https://cloud.sonic-cloud.online/server2/' },
@@ -426,65 +369,137 @@ app.get('/download', async (req, res) => {
     });
     const $ = cheerio.load(response.data);
 
-    let finalLink = null;
-    let rawLink = null;
+    const downloadLinks = [];
 
+    // Method 1: Extract from #link element (main direct link)
     const linkElement = $('#link');
     if (linkElement.length > 0) {
-      rawLink = linkElement.attr('href');
-    }
-
-    if (!rawLink) {
-      $('.wait-done a').each((i, el) => {
-        const href = $(el).attr('href');
-        if (href && href.includes('google.com/server')) {
-          rawLink = href;
-          return false;
-        }
-      });
-    }
-
-    if (!rawLink) {
-      $('a').each((i, el) => {
-        const href = $(el).attr('href');
-        if (href && (href.includes('google.com/server') || href.includes('cscloud') || href.includes('sonic-cloud') || href.includes('.mp4'))) {
-          rawLink = href;
-          return false;
-        }
-      });
-    }
-
-    if (rawLink) {
-      finalLink = transformDownloadUrl(rawLink);
-    }
-
-    if (!finalLink) {
-      const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
-      
-      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:cscloud|sonic-cloud|drive)[^"'\s<>]+/i);
-      if (linkMatch) {
-        finalLink = linkMatch[0];
+      const rawLink = linkElement.attr('href');
+      if (rawLink) {
+        downloadLinks.push({
+          type: 'direct',
+          label: 'Direct Download',
+          raw_url: rawLink,
+          download_url: transformDownloadUrl(rawLink)
+        });
       }
     }
 
-    if (finalLink) {
+    // Method 2: Find all download buttons
+    $('.download-btn, .btn-download, a[href*="google.com/server"], a[href*="sonic-cloud"]').each((i, el) => {
+      const $el = $(el);
+      const href = $el.attr('href');
+      const text = $el.text().trim();
+      
+      if (href && href.includes('google.com/server')) {
+        downloadLinks.push({
+          type: 'direct',
+          label: text || 'Direct Download',
+          raw_url: href,
+          download_url: transformDownloadUrl(href)
+        });
+      }
+    });
+
+    // Method 3: Extract Google Drive, Telegram, Mega links
+    $('a').each((i, el) => {
+      const $el = $(el);
+      const href = $el.attr('href');
+      const text = $el.text().trim().toLowerCase();
+      
+      if (href) {
+        // Google Drive links
+        if (href.includes('drive.google.com') || text.includes('google')) {
+          downloadLinks.push({
+            type: 'google_drive',
+            label: $el.text().trim() || 'Google Drive',
+            raw_url: href,
+            download_url: href
+          });
+        }
+        
+        // Telegram links
+        if (href.includes('t.me') || text.includes('telegram')) {
+          downloadLinks.push({
+            type: 'telegram',
+            label: $el.text().trim() || 'Telegram Download',
+            raw_url: href,
+            download_url: href
+          });
+        }
+        
+        // Mega links
+        if (href.includes('mega.nz') || text.includes('mega')) {
+          downloadLinks.push({
+            type: 'mega',
+            label: $el.text().trim() || 'Mega Download',
+            raw_url: href,
+            download_url: href
+          });
+        }
+      }
+    });
+
+    // Method 4: Check for data attributes or onclick handlers
+    $('[data-link], [data-url], [onclick*="window.open"]').each((i, el) => {
+      const $el = $(el);
+      const dataLink = $el.attr('data-link') || $el.attr('data-url');
+      const onclick = $el.attr('onclick');
+      
+      if (dataLink) {
+        const type = dataLink.includes('google') ? 'google_drive' : 
+                     dataLink.includes('telegram') || dataLink.includes('t.me') ? 'telegram' : 
+                     dataLink.includes('mega') ? 'mega' : 'direct';
+        
+        downloadLinks.push({
+          type: type,
+          label: $el.text().trim() || type.replace('_', ' '),
+          raw_url: dataLink,
+          download_url: type === 'direct' ? transformDownloadUrl(dataLink) : dataLink
+        });
+      }
+      
+      if (onclick) {
+        const urlMatch = onclick.match(/['"]([^'"]+)['"]/);
+        if (urlMatch && urlMatch[1]) {
+          downloadLinks.push({
+            type: 'unknown',
+            label: $el.text().trim() || 'Download',
+            raw_url: urlMatch[1],
+            download_url: urlMatch[1]
+          });
+        }
+      }
+    });
+
+    // Remove duplicates
+    const uniqueLinks = [];
+    const seen = new Set();
+    
+    for (const link of downloadLinks) {
+      const key = link.download_url;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueLinks.push(link);
+      }
+    }
+
+    if (uniqueLinks.length > 0) {
       res.json({
         developer: API_INFO.developer,
         version: API_INFO.version,
         success: true,
-        
         countdown_url: url,
-        raw_link: rawLink,
-        download_url: finalLink
+        total_links: uniqueLinks.length,
+        download_options: uniqueLinks
       });
     } else {
       res.json({
         developer: API_INFO.developer,
         version: API_INFO.version,
         success: false,
-        
         countdown_url: url,
-        message: 'Could not extract download link. The page structure may have changed.'
+        message: 'Could not extract download links. The page structure may have changed.'
       });
     }
   } catch (error) {
@@ -493,62 +508,12 @@ app.get('/download', async (req, res) => {
   }
 });
 
-app.get('/resolve', async (req, res) => {
-  try {
-    const url = req.query.url;
-    if (!url) {
-      return res.status(400).json({ error: 'Missing URL parameter' });
-    }
-
-    const response = await axios.get(url, { 
-      headers,
-      maxRedirects: 0,
-      validateStatus: (status) => status < 400 || status === 302 || status === 301
-    });
-
-    const location = response.headers.location;
-    
-    if (location) {
-      res.json({
-        success: true,
-        originalUrl: url,
-        redirectUrl: location
-      });
-    } else {
-      const $ = cheerio.load(response.data);
-      const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
-      
-      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:cscloud|drive)[^"'\s<>]+/i);
-      
-      res.json({
-        success: !!linkMatch,
-        originalUrl: url,
-        extractedLink: linkMatch ? linkMatch[0] : null
-      });
-    }
-  } catch (error) {
-    if (error.response && error.response.headers.location) {
-      res.json({
-        success: true,
-        originalUrl: req.query.url,
-        redirectUrl: error.response.headers.location
-      });
-    } else {
-      console.error('Resolve error:', error.message);
-      res.status(500).json({ error: 'Failed to resolve URL', message: error.message });
-    }
-  }
-});
-
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`CineSubz API running at http://0.0.0.0:${PORT}`);
-  console.log('Endpoints:');
+  console.log(`✅ CineSubz API running at http://0.0.0.0:${PORT}`);
+  console.log('📋 Endpoints:');
   console.log('  GET /              - API info');
   console.log('  GET /search?q=     - Search movies/TV shows');
   console.log('  GET /details?url=  - Get movie/show details');
   console.log('  GET /episodes?url= - Get TV show episodes');
-  console.log('  GET /episode-details?url= - Get episode download links');
-  console.log('  GET /download?url= - Resolve countdown page');
-  console.log('  GET /resolve?url=  - Follow redirects');
+  console.log('  GET /download?url= - Resolve countdown page to get all download links');
 });
-          
