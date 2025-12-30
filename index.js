@@ -12,7 +12,16 @@ const API_INFO = {
 };
 
 const headers = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Referer': 'https://cinesubz.co/',
+  'Connection': 'keep-alive',
+  'Upgrade-Insecure-Requests': '1',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1'
 };
 
 app.use(express.json());
@@ -185,19 +194,59 @@ app.get('/episodes', async (req, res) => {
 // URL transformation function
 function transformDownloadUrl(url) {
   let modified = url;
-  const mappings = [
-    { from: 'https://google.com/server11/1:/', to: 'https://cloud.sonic-cloud.online/server1/' },
-    { from: 'https://google.com/server12/1:/', to: 'https://cloud.sonic-cloud.online/server1/' },
-    { from: 'https://google.com/server21/1:/', to: 'https://cloud.sonic-cloud.online/server2/' }
+  
+  const urlMappings = [
+    {
+      search: [
+        "https://google.com/server11/1:/",
+        "https://google.com/server12/1:/",
+        "https://google.com/server13/1:/",
+      ],
+      replace: "https://cloud.sonic-cloud.online/server1/",
+    },
+    {
+      search: [
+        "https://google.com/server21/1:/",
+        "https://google.com/server22/1:/",
+        "https://google.com/server23/1:/",
+      ],
+      replace: "https://cloud.sonic-cloud.online/server2/",
+    },
+    {
+      search: ["https://google.com/server3/1:/"],
+      replace: "https://cloud.sonic-cloud.online/server3/",
+    },
+    {
+      search: ["https://google.com/server4/1:/"],
+      replace: "https://cloud.sonic-cloud.online/server4/",
+    },
+    {
+      search: ["https://google.com/server5/1:/"],
+      replace: "https://cloud.sonic-cloud.online/server5/",
+    },
   ];
 
-  for (const map of mappings) {
-    if (url.includes(map.from)) {
-      modified = url.replace(map.from, map.to);
-      if (modified.includes('.mp4')) {
-        modified = modified.replace('.mp4', '?ext=mp4');
-      } else if (modified.includes('.mkv')) {
-        modified = modified.replace('.mkv', '?ext=mkv');
+  for (const mapping of urlMappings) {
+    let match = false;
+    for (const searchUrl of mapping.search) {
+      if (url.includes(searchUrl)) {
+        modified = url.replace(searchUrl, mapping.replace);
+        match = true;
+        break;
+      }
+    }
+    
+    if (match) {
+      if (modified.includes(".mp4?bot=cscloud2bot&code=")) {
+        modified = modified.replace(".mp4?bot=cscloud2bot&code=", "?ext=mp4&bot=cscloud2bot&code=");
+      } else if (modified.includes(".mp4")) {
+        modified = modified.replace(".mp4", "?ext=mp4");
+      } else if (modified.includes(".mkv?bot=cscloud2bot&code=")) {
+        modified = modified.replace(".mkv?bot=cscloud2bot&code=", "?ext=mkv&bot=cscloud2bot&code=");
+      } else if (modified.includes(".mkv")) {
+        modified = modified.replace(".mkv", "?ext=mkv");
+      } else if (modified.includes(".zip")) {
+        modified = modified.replace(".zip", "?ext=zip");
       }
       break;
     }
@@ -214,8 +263,8 @@ app.get('/download', async (req, res) => {
 
     const { data } = await axios.get(url, { 
       headers, 
-      timeout: 8000,
-      maxRedirects: 3
+      timeout: 10000,
+      maxRedirects: 5
     });
     
     const $ = cheerio.load(data);
@@ -224,26 +273,84 @@ app.get('/download', async (req, res) => {
     const linkElement = $('#link');
     const rawLink = linkElement.attr('href');
     
-    if (!rawLink || !rawLink.includes('google.com/server')) {
-      return res.json({
-        ...API_INFO,
-        success: false,
-        countdown_url: url,
-        message: 'Could not extract download link. Please visit the countdown page directly.'
-      });
+    const downloadOptions = [];
+    
+    // Check for direct download buttons first (based on screenshot)
+    $('.download-section a, #dl-links a, .button').each((i, el) => {
+      const $btn = $(el);
+      const href = $btn.attr('href');
+      const text = $btn.text().trim().toLowerCase();
+      
+      if (href && !href.startsWith('#')) {
+        if (text.includes('direct download') || href.includes('cloud.sonic-cloud.online')) {
+          downloadOptions.push({
+            type: 'direct',
+            label: 'Direct Download',
+            raw_url: href,
+            download_url: transformDownloadUrl(href)
+          });
+        } else if (text.includes('google download') || href.includes('drive.google.com')) {
+          downloadOptions.push({
+            type: 'google',
+            label: text.includes('1') ? 'Google Download 1' : 'Google Download 2',
+            raw_url: href,
+            download_url: href
+          });
+        } else if (text.includes('telegram') || href.includes('t.me/')) {
+          downloadOptions.push({
+            type: 'telegram',
+            label: 'Telegram Download',
+            raw_url: href,
+            download_url: href
+          });
+        }
+      }
+    });
+
+    // Fallback to the primary #link if not already captured
+    if (rawLink && !downloadOptions.some(opt => opt.raw_url === rawLink)) {
+      if (rawLink.includes('google.com/server')) {
+        downloadOptions.push({
+          type: 'direct',
+          label: 'Direct Download',
+          raw_url: rawLink,
+          download_url: transformDownloadUrl(rawLink)
+        });
+      } else if (rawLink.includes('t.me/')) {
+        downloadOptions.push({
+          type: 'telegram',
+          label: 'Telegram Download',
+          raw_url: rawLink,
+          download_url: rawLink
+        });
+      }
     }
 
-    const directUrl = transformDownloadUrl(rawLink);
+    // Check for admin/error container telegram links
+    $('#errorContainer a, .contact-admin a').each((i, el) => {
+      const href = $(el).attr('href');
+      if (href && href.includes('t.me/')) {
+        downloadOptions.push({
+          type: 'telegram',
+          label: 'Contact Admin',
+          raw_url: href,
+          download_url: href
+        });
+      }
+    });
+
     const bodyText = $('body').text();
-    const fileName = bodyText.match(/CineSubz\.com[^\n]+\.(mp4|mkv)/)?.[0] || 'video.mp4';
+    const fileName = $('title').text().replace('CineSubz.com - ', '').trim() || 
+                     bodyText.match(/CineSubz\.com[^\n]+\.(mp4|mkv|zip)/)?.[0] || 
+                     'video.mp4';
     const fileSize = bodyText.match(/(\d+\.?\d*\s*(?:GB|MB))/i)?.[1] || 'Unknown';
 
     res.json({
       ...API_INFO,
-      success: true,
+      success: downloadOptions.length > 0,
       countdown_url: url,
-      raw_link: rawLink,
-      download_url: directUrl,
+      total_links: downloadOptions.length,
+      download_options: downloadOptions,
       file_info: {
         name: fileName,
         size: fileSize
@@ -264,7 +371,7 @@ module.exports = app;
 // For local testing
 if (require.main === module) {
   const PORT = process.env.PORT || 5000;
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`API running on port ${PORT}`);
   });
-      }
+                      }
