@@ -8,7 +8,7 @@ const BASE_URL = 'https://cinesubz.co';
 
 const API_INFO = {
   developer: 'Mr Senal',
-  version: 'v1',
+  version: 'v1.1',
   api_name: 'CineSubz Movie Downloader API'
 };
 
@@ -17,10 +17,12 @@ const headers = {
   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
   'Accept-Language': 'en-US,en;q=0.5',
   'Connection': 'keep-alive',
+  'Referer': 'https://cinesubz.co/'
 };
 
 app.use(express.json());
 
+// Root endpoint
 app.get('/', (req, res) => {
   res.json({
     developer: API_INFO.developer,
@@ -45,16 +47,29 @@ app.get('/', (req, res) => {
         description: 'Get TV show episodes list',
         example: '/episodes?url=https://cinesubz.co/tvshows/the-witcher-2019-sinhala-sub/'
       },
+      episode_details: {
+        method: 'GET',
+        path: '/episode-details?url={encoded_url}',
+        description: 'Get episode download links',
+        example: '/episode-details?url=https://cinesubz.co/...'
+      },
       download: {
         method: 'GET',
         path: '/download?url={countdown_page_url}',
         description: 'Resolve countdown page to get final download link',
         example: '/download?url=https://cinesubz.co/api-.../odcemnd9hb/'
+      },
+      resolve: {
+        method: 'GET',
+        path: '/resolve?url={url}',
+        description: 'Follow redirects to get final URL',
+        example: '/resolve?url=https://...'
       }
     }
   });
 });
 
+// Search endpoint
 app.get('/search', async (req, res) => {
   try {
     const query = req.query.q;
@@ -151,10 +166,16 @@ app.get('/search', async (req, res) => {
     });
   } catch (error) {
     console.error('Search error:', error.message);
-    res.status(500).json({ error: 'Failed to search', message: error.message });
+    res.status(500).json({ 
+      developer: API_INFO.developer,
+      version: API_INFO.version,
+      error: 'Failed to search', 
+      message: error.message 
+    });
   }
 });
 
+// Details endpoint
 app.get('/details', async (req, res) => {
   try {
     const url = req.query.url;
@@ -196,10 +217,10 @@ app.get('/details', async (req, res) => {
       const href = $el.attr('href');
       const text = $el.text().trim();
       
-      if (href && (href.includes('/api-') || href.includes('cinesubz') && (
+      if (href && (href.includes('/api-') || (href.includes('cinesubz') && (
         text.toLowerCase().includes('download') ||
         text.match(/(480p|720p|1080p|2160p|4K)/i)
-      ))) {
+      )))) {
         const qualityMatch = text.match(/(480p|720p|1080p|2160p|4K)/i);
         downloadLinks.push({
           quality: qualityMatch ? qualityMatch[1] : 'Unknown',
@@ -255,10 +276,16 @@ app.get('/details', async (req, res) => {
     });
   } catch (error) {
     console.error('Details error:', error.message);
-    res.status(500).json({ error: 'Failed to get details', message: error.message });
+    res.status(500).json({ 
+      developer: API_INFO.developer,
+      version: API_INFO.version,
+      error: 'Failed to get details', 
+      message: error.message 
+    });
   }
 });
 
+// Episodes endpoint
 app.get('/episodes', async (req, res) => {
   try {
     const url = req.query.url;
@@ -308,6 +335,8 @@ app.get('/episodes', async (req, res) => {
     });
 
     res.json({
+      developer: API_INFO.developer,
+      version: API_INFO.version,
       title,
       poster,
       url,
@@ -316,10 +345,16 @@ app.get('/episodes', async (req, res) => {
     });
   } catch (error) {
     console.error('Episodes error:', error.message);
-    res.status(500).json({ error: 'Failed to get episodes', message: error.message });
+    res.status(500).json({ 
+      developer: API_INFO.developer,
+      version: API_INFO.version,
+      error: 'Failed to get episodes', 
+      message: error.message 
+    });
   }
 });
 
+// Episode details endpoint
 app.get('/episode-details', async (req, res) => {
   try {
     const url = req.query.url;
@@ -366,6 +401,8 @@ app.get('/episode-details', async (req, res) => {
     });
 
     res.json({
+      developer: API_INFO.developer,
+      version: API_INFO.version,
       title,
       poster,
       url,
@@ -373,10 +410,16 @@ app.get('/episode-details', async (req, res) => {
     });
   } catch (error) {
     console.error('Episode details error:', error.message);
-    res.status(500).json({ error: 'Failed to get episode details', message: error.message });
+    res.status(500).json({ 
+      developer: API_INFO.developer,
+      version: API_INFO.version,
+      error: 'Failed to get episode details', 
+      message: error.message 
+    });
   }
 });
 
+// URL transformation mappings
 const urlMappings = [
   { search: ['https://google.com/server11/1:/', 'https://google.com/server12/1:/', 'https://google.com/server13/1:/'], replace: 'https://cloud.sonic-cloud.online/server1/' },
   { search: ['https://google.com/server21/1:/', 'https://google.com/server22/1:/', 'https://google.com/server23/1:/'], replace: 'https://cloud.sonic-cloud.online/server2/' },
@@ -385,6 +428,7 @@ const urlMappings = [
   { search: ['https://google.com/server5/1:/'], replace: 'https://cloud.sonic-cloud.online/server5/' }
 ];
 
+// Transform download URL
 function transformDownloadUrl(originalUrl) {
   let modifiedUrl = originalUrl;
   
@@ -413,11 +457,16 @@ function transformDownloadUrl(originalUrl) {
   return modifiedUrl;
 }
 
+// Download endpoint - FIXED VERSION
 app.get('/download', async (req, res) => {
   try {
     const url = req.query.url;
     if (!url) {
-      return res.status(400).json({ error: 'Missing URL parameter' });
+      return res.status(400).json({ 
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        error: 'Missing URL parameter' 
+      });
     }
 
     const response = await axios.get(url, { 
@@ -428,76 +477,186 @@ app.get('/download', async (req, res) => {
 
     let finalLink = null;
     let rawLink = null;
+    let linkType = 'unknown';
 
+    // Strategy 1: Extract from #link element (highest priority)
     const linkElement = $('#link');
     if (linkElement.length > 0) {
       rawLink = linkElement.attr('href');
+      console.log('Found link in #link element:', rawLink);
     }
 
+    // Strategy 2: Extract from .wait-done div (skip navigation links)
     if (!rawLink) {
       $('.wait-done a').each((i, el) => {
         const href = $(el).attr('href');
-        if (href && href.includes('google.com/server')) {
+        const text = $(el).text().trim().toLowerCase();
+        
+        // Skip "back to movie" or "previous" links
+        if (href && 
+            !href.includes('/movies/') && 
+            !href.includes('/tvshows/') && 
+            !text.includes('sinhala') &&
+            !text.includes('previous') &&
+            !text.includes('back')) {
           rawLink = href;
-          return false;
+          console.log('Found link in .wait-done:', rawLink);
+          return false; // break the loop
         }
       });
     }
 
+    // Strategy 3: Look for any download-related links
     if (!rawLink) {
       $('a').each((i, el) => {
         const href = $(el).attr('href');
-        if (href && (href.includes('google.com/server') || href.includes('cscloud') || href.includes('sonic-cloud') || href.includes('.mp4'))) {
+        if (href && (
+          href.includes('google.com/server') || 
+          href.includes('sonic-cloud') ||
+          href.includes('t.me/') ||
+          href.includes('drive.google.com') ||
+          href.includes('mega.nz') ||
+          href.includes('mediafire.com')
+        )) {
           rawLink = href;
+          console.log('Found link in general search:', rawLink);
           return false;
         }
       });
     }
 
+    // Process the raw link if found
     if (rawLink) {
-      finalLink = transformDownloadUrl(rawLink);
+      // Determine link type and process accordingly
+      if (rawLink.includes('t.me/') || rawLink.includes('telegram')) {
+        linkType = 'telegram';
+        finalLink = rawLink;
+      } else if (rawLink.includes('drive.google.com')) {
+        linkType = 'google_drive';
+        finalLink = rawLink;
+      } else if (rawLink.includes('mega.nz')) {
+        linkType = 'mega';
+        finalLink = rawLink;
+      } else if (rawLink.includes('mediafire.com')) {
+        linkType = 'mediafire';
+        finalLink = rawLink;
+      } else if (rawLink.includes('google.com/server')) {
+        linkType = 'direct';
+        finalLink = transformDownloadUrl(rawLink);
+      } else if (rawLink.includes('sonic-cloud')) {
+        linkType = 'direct';
+        finalLink = rawLink;
+      } else {
+        linkType = 'other';
+        finalLink = rawLink;
+      }
+
+      console.log('Final processed link:', finalLink, 'Type:', linkType);
     }
 
+    // Strategy 4: Fallback - extract from scripts
     if (!finalLink) {
+      console.log('Trying script extraction...');
       const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
       
-      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:cscloud|sonic-cloud|drive)[^"'\s<>]+/i);
-      if (linkMatch) {
-        finalLink = linkMatch[0];
+      const patterns = [
+        /href\s*=\s*["']([^"']*sonic-cloud[^"']*)["']/i,
+        /href\s*=\s*["']([^"']*google\.com\/server[^"']*)["']/i,
+        /href\s*=\s*["']([^"']*t\.me\/[^"']*)["']/i,
+        /href\s*=\s*["']([^"']*drive\.google\.com[^"']*)["']/i,
+        /href\s*=\s*["']([^"']*mega\.nz[^"']*)["']/i,
+        /https?:\/\/[^"'\s<>]+sonic-cloud[^"'\s<>]+/i,
+        /https?:\/\/[^"'\s<>]+google\.com\/server[^"'\s<>]+/i
+      ];
+      
+      for (const pattern of patterns) {
+        const linkMatch = scripts.match(pattern);
+        if (linkMatch) {
+          rawLink = linkMatch[1] || linkMatch[0];
+          
+          if (rawLink.includes('t.me')) linkType = 'telegram';
+          else if (rawLink.includes('drive.google')) linkType = 'google_drive';
+          else if (rawLink.includes('mega.nz')) linkType = 'mega';
+          else if (rawLink.includes('google.com/server')) {
+            linkType = 'direct';
+            rawLink = transformDownloadUrl(rawLink);
+          } else if (rawLink.includes('sonic-cloud')) linkType = 'direct';
+          
+          finalLink = rawLink;
+          console.log('Found link in scripts:', finalLink);
+          break;
+        }
       }
     }
 
+    // Return response
     if (finalLink) {
       res.json({
         developer: API_INFO.developer,
         version: API_INFO.version,
         success: true,
-        
         countdown_url: url,
         raw_link: rawLink,
-        download_url: finalLink
+        download_url: finalLink,
+        link_type: linkType,
+        instructions: getLinkTypeInstructions(linkType)
       });
     } else {
+      // Debug: Show what links were found
+      const allLinks = $('a').map((i, el) => $(el).attr('href')).get()
+        .filter(h => h && h.startsWith('http'))
+        .slice(0, 10);
+      
       res.json({
         developer: API_INFO.developer,
         version: API_INFO.version,
         success: false,
-        
         countdown_url: url,
-        message: 'Could not extract download link. The page structure may have changed.'
+        message: 'Could not extract download link. The page may use a different structure.',
+        debug_info: {
+          found_links: allLinks,
+          has_link_element: $('#link').length > 0,
+          has_wait_done: $('.wait-done').length > 0
+        }
       });
     }
   } catch (error) {
     console.error('Download error:', error.message);
-    res.status(500).json({ error: 'Failed to resolve download link', message: error.message });
+    res.status(500).json({ 
+      developer: API_INFO.developer,
+      version: API_INFO.version,
+      success: false,
+      error: 'Failed to resolve download link', 
+      message: error.message 
+    });
   }
 });
 
+// Helper function to get instructions based on link type
+function getLinkTypeInstructions(linkType) {
+  const instructions = {
+    telegram: 'Join the Telegram channel/group to access the download',
+    google_drive: 'Open Google Drive link to download the file',
+    mega: 'Open Mega.nz link to download the file',
+    mediafire: 'Open MediaFire link to download the file',
+    direct: 'Direct download link - click to start downloading',
+    other: 'Follow the link to access the download',
+    unknown: 'Follow the link to download'
+  };
+  
+  return instructions[linkType] || instructions.unknown;
+}
+
+// Resolve endpoint
 app.get('/resolve', async (req, res) => {
   try {
     const url = req.query.url;
     if (!url) {
-      return res.status(400).json({ error: 'Missing URL parameter' });
+      return res.status(400).json({ 
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        error: 'Missing URL parameter' 
+      });
     }
 
     const response = await axios.get(url, { 
@@ -510,6 +669,8 @@ app.get('/resolve', async (req, res) => {
     
     if (location) {
       res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
         success: true,
         originalUrl: url,
         redirectUrl: location
@@ -518,9 +679,11 @@ app.get('/resolve', async (req, res) => {
       const $ = cheerio.load(response.data);
       const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
       
-      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:cscloud|drive)[^"'\s<>]+/i);
+      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:sonic-cloud|drive|mega)[^"'\s<>]+/i);
       
       res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
         success: !!linkMatch,
         originalUrl: url,
         extractedLink: linkMatch ? linkMatch[0] : null
@@ -529,25 +692,37 @@ app.get('/resolve', async (req, res) => {
   } catch (error) {
     if (error.response && error.response.headers.location) {
       res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
         success: true,
         originalUrl: req.query.url,
         redirectUrl: error.response.headers.location
       });
     } else {
       console.error('Resolve error:', error.message);
-      res.status(500).json({ error: 'Failed to resolve URL', message: error.message });
+      res.status(500).json({ 
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        error: 'Failed to resolve URL', 
+        message: error.message 
+      });
     }
   }
 });
 
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`CineSubz API running at http://0.0.0.0:${PORT}`);
-  console.log('Endpoints:');
-  console.log('  GET /              - API info');
-  console.log('  GET /search?q=     - Search movies/TV shows');
-  console.log('  GET /details?url=  - Get movie/show details');
-  console.log('  GET /episodes?url= - Get TV show episodes');
-  console.log('  GET /episode-details?url= - Get episode download links');
-  console.log('  GET /download?url= - Resolve countdown page');
-  console.log('  GET /resolve?url=  - Follow redirects');
+  console.log(`╔════════════════════════════════════════════════════════╗`);
+  console.log(`║  CineSubz API v${API_INFO.version} - by ${API_INFO.developer}           ║`);
+  console.log(`╚════════════════════════════════════════════════════════╝`);
+  console.log(`\n🚀 Server running at: http://0.0.0.0:${PORT}\n`);
+  console.log(`📡 Available Endpoints:`);
+  console.log(`   GET  /                    - API information`);
+  console.log(`   GET  /search?q=           - Search movies/TV shows`);
+  console.log(`   GET  /details?url=        - Get movie/show details`);
+  console.log(`   GET  /episodes?url=       - Get TV show episodes`);
+  console.log(`   GET  /episode-details?url=- Get episode downloads`);
+  console.log(`   GET  /download?url=       - Resolve countdown page`);
+  console.log(`   GET  /resolve?url=        - Follow URL redirects`);
+  console.log(`\n✅ Ready to accept requests!\n`);
 });
