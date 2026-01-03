@@ -457,7 +457,89 @@ function transformDownloadUrl(originalUrl) {
   return modifiedUrl;
 }
 
-// Download endpoint - FIXED VERSION
+// Helper function to extract final download links from sonic-cloud page
+async function extractSonicCloudLinks(sonicCloudUrl) {
+  try {
+    console.log('Fetching sonic-cloud page:', sonicCloudUrl);
+    const response = await axios.get(sonicCloudUrl, { 
+      headers,
+      maxRedirects: 5
+    });
+    const $ = cheerio.load(response.data);
+
+    const downloadLinks = {
+      direct: null,
+      google_drive_1: null,
+      google_drive_2: null,
+      telegram: null,
+      file_name: null,
+      file_size: null
+    };
+
+    // Extract file info
+    downloadLinks.file_name = $('body').text().match(/File Name:\s*([^\n]+)/)?.[1]?.trim() || 
+                              $('.file-name').text().trim();
+    downloadLinks.file_size = $('body').text().match(/File Size:\s*([^\n]+)/)?.[1]?.trim() || 
+                              $('.file-size').text().trim();
+
+    // Method 1: Look for button links
+    $('a').each((i, el) => {
+      const $el = $(el);
+      const href = $el.attr('href');
+      const text = $el.text().trim().toLowerCase();
+
+      if (!href) return;
+
+      if (text.includes('direct download')) {
+        downloadLinks.direct = href;
+      } else if (text.includes('google download 1')) {
+        downloadLinks.google_drive_1 = href;
+      } else if (text.includes('google download 2')) {
+        downloadLinks.google_drive_2 = href;
+      } else if (text.includes('telegram download')) {
+        downloadLinks.telegram = href;
+      }
+    });
+
+    // Method 2: Extract from scripts if buttons not found
+    if (!downloadLinks.direct && !downloadLinks.telegram) {
+      const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
+      
+      // Look for direct download link
+      const directMatch = scripts.match(/direct[^"']*["']([^"']+)["']/i);
+      if (directMatch) downloadLinks.direct = directMatch[1];
+
+      // Look for Google Drive links
+      const gdrive1Match = scripts.match(/google[^"']*1[^"']*["']([^"']+drive\.google[^"']+)["']/i);
+      if (gdrive1Match) downloadLinks.google_drive_1 = gdrive1Match[1];
+
+      const gdrive2Match = scripts.match(/google[^"']*2[^"']*["']([^"']+drive\.google[^"']+)["']/i);
+      if (gdrive2Match) downloadLinks.google_drive_2 = gdrive2Match[1];
+
+      // Look for Telegram link
+      const telegramMatch = scripts.match(/telegram[^"']*["']([^"']+t\.me[^"']+)["']/i);
+      if (telegramMatch) downloadLinks.telegram = telegramMatch[1];
+    }
+
+    // Method 3: Look for any direct file links in the page
+    if (!downloadLinks.direct) {
+      $('a').each((i, el) => {
+        const href = $(el).attr('href');
+        if (href && (href.includes('.mp4') || href.includes('.mkv') || href.includes('.zip'))) {
+          downloadLinks.direct = href;
+          return false;
+        }
+      });
+    }
+
+    return downloadLinks;
+  } catch (error) {
+    console.error('Error extracting sonic-cloud links:', error.message);
+    return null;
+  }
+}
+
+// Download endpoint - FIXED VERSION with sonic-cloud support
 app.get('/download', async (req, res) => {
   try {
     const url = req.query.url;
@@ -531,24 +613,122 @@ app.get('/download', async (req, res) => {
       if (rawLink.includes('t.me/') || rawLink.includes('telegram')) {
         linkType = 'telegram';
         finalLink = rawLink;
+        
+        res.json({
+          developer: API_INFO.developer,
+          version: API_INFO.version,
+          success: true,
+          countdown_url: url,
+          raw_link: rawLink,
+          download_url: finalLink,
+          link_type: linkType,
+          instructions: getLinkTypeInstructions(linkType)
+        });
+        return;
       } else if (rawLink.includes('drive.google.com')) {
         linkType = 'google_drive';
         finalLink = rawLink;
+        
+        res.json({
+          developer: API_INFO.developer,
+          version: API_INFO.version,
+          success: true,
+          countdown_url: url,
+          raw_link: rawLink,
+          download_url: finalLink,
+          link_type: linkType,
+          instructions: getLinkTypeInstructions(linkType)
+        });
+        return;
       } else if (rawLink.includes('mega.nz')) {
         linkType = 'mega';
         finalLink = rawLink;
+        
+        res.json({
+          developer: API_INFO.developer,
+          version: API_INFO.version,
+          success: true,
+          countdown_url: url,
+          raw_link: rawLink,
+          download_url: finalLink,
+          link_type: linkType,
+          instructions: getLinkTypeInstructions(linkType)
+        });
+        return;
       } else if (rawLink.includes('mediafire.com')) {
         linkType = 'mediafire';
         finalLink = rawLink;
+        
+        res.json({
+          developer: API_INFO.developer,
+          version: API_INFO.version,
+          success: true,
+          countdown_url: url,
+          raw_link: rawLink,
+          download_url: finalLink,
+          link_type: linkType,
+          instructions: getLinkTypeInstructions(linkType)
+        });
+        return;
       } else if (rawLink.includes('google.com/server')) {
-        linkType = 'direct';
+        linkType = 'sonic_cloud_page';
         finalLink = transformDownloadUrl(rawLink);
+        console.log('Transformed to sonic-cloud URL:', finalLink);
       } else if (rawLink.includes('sonic-cloud')) {
-        linkType = 'direct';
+        linkType = 'sonic_cloud_page';
         finalLink = rawLink;
       } else {
         linkType = 'other';
         finalLink = rawLink;
+      }
+
+      // If it's a sonic-cloud page, fetch the actual download links
+      if (linkType === 'sonic_cloud_page' && finalLink) {
+        console.log('Extracting links from sonic-cloud page...');
+        const sonicCloudLinks = await extractSonicCloudLinks(finalLink);
+        
+        if (sonicCloudLinks && (sonicCloudLinks.direct || sonicCloudLinks.telegram || sonicCloudLinks.google_drive_1)) {
+          res.json({
+            developer: API_INFO.developer,
+            version: API_INFO.version,
+            success: true,
+            countdown_url: url,
+            raw_link: rawLink,
+            sonic_cloud_page: finalLink,
+            
+            file_info: {
+              name: sonicCloudLinks.file_name || 'N/A',
+              size: sonicCloudLinks.file_size || 'N/A'
+            },
+            
+            download_links: {
+              direct_download: sonicCloudLinks.direct || null,
+              google_drive_1: sonicCloudLinks.google_drive_1 || null,
+              google_drive_2: sonicCloudLinks.google_drive_2 || null,
+              telegram: sonicCloudLinks.telegram || null
+            },
+            
+            instructions: {
+              direct: 'Direct download - fastest, click to download immediately',
+              google_drive: 'Google Drive - may require sign-in, can stream online',
+              telegram: 'Telegram - join channel/group to access file'
+            }
+          });
+          return;
+        } else {
+          // Couldn't extract links from sonic-cloud page, return the page URL
+          res.json({
+            developer: API_INFO.developer,
+            version: API_INFO.version,
+            success: true,
+            countdown_url: url,
+            raw_link: rawLink,
+            sonic_cloud_page: finalLink,
+            message: 'Visit the sonic-cloud page to access download options',
+            instructions: 'Open the sonic_cloud_page URL in your browser to see download buttons'
+          });
+          return;
+        }
       }
 
       console.log('Final processed link:', finalLink, 'Type:', linkType);
@@ -578,9 +758,9 @@ app.get('/download', async (req, res) => {
           else if (rawLink.includes('drive.google')) linkType = 'google_drive';
           else if (rawLink.includes('mega.nz')) linkType = 'mega';
           else if (rawLink.includes('google.com/server')) {
-            linkType = 'direct';
+            linkType = 'sonic_cloud_page';
             rawLink = transformDownloadUrl(rawLink);
-          } else if (rawLink.includes('sonic-cloud')) linkType = 'direct';
+          } else if (rawLink.includes('sonic-cloud')) linkType = 'sonic_cloud_page';
           
           finalLink = rawLink;
           console.log('Found link in scripts:', finalLink);
