@@ -1,12 +1,25 @@
-
 {
-  "name": "senal-tech-api",
-  "version": "2.0.0",
-  "main": "node index.js",
+  "name": "cinesubz-api",
+  "version": "1.2.0",
+  "description": "CineSubz Movie Downloader API by Mr Senal",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "keywords": ["cinesubz", "movie", "download", "api"],
+  "author": "Mr Senal",
+  "license": "MIT",
   "dependencies": {
-    "axios": "^1.13.2",
-    "cheerio": "^1.1.2",
+    "axios": "^1.6.2",
+    "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.5",
-    "express": "^4.22.1"
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "engines": {
+    "node": ">=18.x"
   }
 }
