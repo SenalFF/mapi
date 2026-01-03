@@ -610,6 +610,69 @@ app.get('/episode-details', async (req, res) => {
   }
 });
 
+// Resolve endpoint
+app.get('/resolve', async (req, res) => {
+  try {
+    const url = req.query.url;
+    if (!url) {
+      return res.status(400).json({ 
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        error: 'Missing URL parameter' 
+      });
+    }
+
+    const response = await axios.get(url, { 
+      headers,
+      maxRedirects: 0,
+      validateStatus: (status) => status < 400 || status === 302 || status === 301
+    });
+
+    const location = response.headers.location;
+    
+    if (location) {
+      res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: true,
+        originalUrl: url,
+        redirectUrl: location
+      });
+    } else {
+      const $ = cheerio.load(response.data);
+      const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
+      
+      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:sonic-cloud|drive|mega)[^"'\s<>]+/i);
+      
+      res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: !!linkMatch,
+        originalUrl: url,
+        extractedLink: linkMatch ? linkMatch[0] : null
+      });
+    }
+  } catch (error) {
+    if (error.response && error.response.headers.location) {
+      res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: true,
+        originalUrl: req.query.url,
+        redirectUrl: error.response.headers.location
+      });
+    } else {
+      console.error('Resolve error:', error.message);
+      res.status(500).json({ 
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        error: 'Failed to resolve URL', 
+        message: error.message 
+      });
+    }
+  }
+});
+
 // MAIN DOWNLOAD ENDPOINT - Extracts all download links
 app.get('/download', async (req, res) => {
   try {
