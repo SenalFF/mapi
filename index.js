@@ -8,7 +8,7 @@ const BASE_URL = 'https://cinesubz.co';
 
 const API_INFO = {
   developer: 'Mr Senal',
-  version: 'v1.2',
+  version: 'v1.1',
   api_name: 'CineSubz Movie Downloader API'
 };
 
@@ -21,197 +21,6 @@ const headers = {
 };
 
 app.use(express.json());
-
-// URL transformation mappings
-const urlMappings = [
-  { search: ['https://google.com/server11/1:/', 'https://google.com/server12/1:/', 'https://google.com/server13/1:/'], replace: 'https://cloud.sonic-cloud.online/server1/' },
-  { search: ['https://google.com/server21/1:/', 'https://google.com/server22/1:/', 'https://google.com/server23/1:/'], replace: 'https://cloud.sonic-cloud.online/server2/' },
-  { search: ['https://google.com/server3/1:/'], replace: 'https://cloud.sonic-cloud.online/server3/' },
-  { search: ['https://google.com/server4/1:/'], replace: 'https://cloud.sonic-cloud.online/server4/' },
-  { search: ['https://google.com/server5/1:/'], replace: 'https://cloud.sonic-cloud.online/server5/' }
-];
-
-// Transform download URL
-function transformDownloadUrl(originalUrl) {
-  let modifiedUrl = originalUrl;
-  
-  for (const mapping of urlMappings) {
-    for (const searchUrl of mapping.search) {
-      if (originalUrl.includes(searchUrl)) {
-        modifiedUrl = originalUrl.replace(searchUrl, mapping.replace);
-        
-        if (modifiedUrl.includes('.mp4?bot=cscloud2bot&code=')) {
-          modifiedUrl = modifiedUrl.replace('.mp4?bot=cscloud2bot&code=', '?ext=mp4&bot=cscloud2bot&code=');
-        } else if (modifiedUrl.includes('.mp4')) {
-          modifiedUrl = modifiedUrl.replace('.mp4', '?ext=mp4');
-        } else if (modifiedUrl.includes('.mkv?bot=cscloud2bot&code=')) {
-          modifiedUrl = modifiedUrl.replace('.mkv?bot=cscloud2bot&code=', '?ext=mkv&bot=cscloud2bot&code=');
-        } else if (modifiedUrl.includes('.mkv')) {
-          modifiedUrl = modifiedUrl.replace('.mkv', '?ext=mkv');
-        } else if (modifiedUrl.includes('.zip')) {
-          modifiedUrl = modifiedUrl.replace('.zip', '?ext=zip');
-        }
-        
-        return modifiedUrl;
-      }
-    }
-  }
-  
-  return modifiedUrl;
-}
-
-// Helper function to extract final download links from sonic-cloud page
-async function extractSonicCloudLinks(sonicCloudUrl) {
-  try {
-    console.log('🔍 Fetching sonic-cloud page:', sonicCloudUrl);
-    const response = await axios.get(sonicCloudUrl, { 
-      headers: {
-        ...headers,
-        'Referer': 'https://cinesubz.lk/'
-      },
-      maxRedirects: 5,
-      timeout: 15000
-    });
-    
-    const $ = cheerio.load(response.data);
-
-    const downloadLinks = {
-      direct: null,
-      google_drive_1: null,
-      google_drive_2: null,
-      telegram: null,
-      file_name: null,
-      file_size: null
-    };
-
-    // Extract file info from page text
-    const pageText = $('body').text();
-    
-    const fileNameMatch = pageText.match(/File Name:\s*([^\n]+)/i);
-    if (fileNameMatch) {
-      downloadLinks.file_name = fileNameMatch[1].trim();
-    }
-    
-    const fileSizeMatch = pageText.match(/File Size:\s*([^\n]+)/i);
-    if (fileSizeMatch) {
-      downloadLinks.file_size = fileSizeMatch[1].trim();
-    }
-
-    // Method 1: Extract from button/link elements
-    $('a, button').each((i, el) => {
-      const $el = $(el);
-      const href = $el.attr('href') || $el.attr('onclick');
-      const text = $el.text().trim();
-      const lowerText = text.toLowerCase();
-
-      if (!href && !text) return;
-
-      // Extract URLs from onclick handlers
-      let extractedUrl = href;
-      if (href && href.includes('window.location')) {
-        const urlMatch = href.match(/['"](https?:\/\/[^'"]+)['"]/);
-        if (urlMatch) extractedUrl = urlMatch[1];
-      }
-
-      // Categorize by button text
-      if (lowerText.includes('direct download') || lowerText.includes('direct dl')) {
-        if (extractedUrl) downloadLinks.direct = extractedUrl;
-      } else if (lowerText.includes('google download 1') || lowerText.includes('google dl 1')) {
-        if (extractedUrl) downloadLinks.google_drive_1 = extractedUrl;
-      } else if (lowerText.includes('google download 2') || lowerText.includes('google dl 2')) {
-        if (extractedUrl) downloadLinks.google_drive_2 = extractedUrl;
-      } else if (lowerText.includes('telegram download') || lowerText.includes('telegram dl')) {
-        if (extractedUrl) downloadLinks.telegram = extractedUrl;
-      }
-
-      // Also check href directly for known patterns
-      if (extractedUrl) {
-        if (extractedUrl.includes('drive.google.com') && !downloadLinks.google_drive_1) {
-          downloadLinks.google_drive_1 = extractedUrl;
-        } else if (extractedUrl.includes('t.me/') && !downloadLinks.telegram) {
-          downloadLinks.telegram = extractedUrl;
-        }
-      }
-    });
-
-    // Method 2: Extract from scripts
-    const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
-    
-    if (!downloadLinks.direct) {
-      const directMatches = [
-        /directDownload[^'"]*['"]([^'"]+)['"]/i,
-        /direct[^'"]*download[^'"]*['"]([^'"]+)['"]/i,
-        /onclick.*?location\.href\s*=\s*['"]([^'"]+)['"]/i
-      ];
-      
-      for (const pattern of directMatches) {
-        const match = scripts.match(pattern);
-        if (match && match[1] && !match[1].includes('google.com/server')) {
-          downloadLinks.direct = match[1];
-          break;
-        }
-      }
-    }
-
-    if (!downloadLinks.google_drive_1) {
-      const gdriveMatch = scripts.match(/drive\.google\.com\/[^'"]+/i);
-      if (gdriveMatch) {
-        const fullUrl = gdriveMatch[0].startsWith('http') ? gdriveMatch[0] : 'https://' + gdriveMatch[0];
-        downloadLinks.google_drive_1 = fullUrl;
-      }
-    }
-
-    if (!downloadLinks.telegram) {
-      const telegramMatch = scripts.match(/t\.me\/[^'"]+/i);
-      if (telegramMatch) {
-        const fullUrl = telegramMatch[0].startsWith('http') ? telegramMatch[0] : 'https://' + telegramMatch[0];
-        downloadLinks.telegram = fullUrl;
-      }
-    }
-
-    // Method 3: Look for any direct file download links
-    if (!downloadLinks.direct) {
-      $('a').each((i, el) => {
-        const href = $(el).attr('href');
-        if (href && (href.endsWith('.mp4') || href.endsWith('.mkv') || 
-                     href.includes('.mp4?') || href.includes('.mkv?'))) {
-          if (href.startsWith('http')) {
-            downloadLinks.direct = href;
-            return false;
-          }
-        }
-      });
-    }
-
-    console.log('✅ Extracted links:', {
-      direct: !!downloadLinks.direct,
-      gdrive1: !!downloadLinks.google_drive_1,
-      gdrive2: !!downloadLinks.google_drive_2,
-      telegram: !!downloadLinks.telegram
-    });
-
-    return downloadLinks;
-  } catch (error) {
-    console.error('❌ Error extracting sonic-cloud links:', error.message);
-    return null;
-  }
-}
-
-// Helper function to get instructions based on link type
-function getLinkTypeInstructions(linkType) {
-  const instructions = {
-    telegram: 'Join the Telegram channel/group to access the download',
-    google_drive: 'Open Google Drive link to download the file',
-    mega: 'Open Mega.nz link to download the file',
-    mediafire: 'Open MediaFire link to download the file',
-    direct: 'Direct download link - click to start downloading',
-    sonic_cloud_page: 'Visit sonic-cloud page to access all download options',
-    other: 'Follow the link to access the download',
-    unknown: 'Follow the link to download'
-  };
-  
-  return instructions[linkType] || instructions.unknown;
-}
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -247,7 +56,7 @@ app.get('/', (req, res) => {
       download: {
         method: 'GET',
         path: '/download?url={countdown_page_url}',
-        description: 'Resolve countdown page and extract ALL download links',
+        description: 'Resolve countdown page to get final download link',
         example: '/download?url=https://cinesubz.co/api-.../odcemnd9hb/'
       },
       resolve: {
@@ -610,6 +419,234 @@ app.get('/episode-details', async (req, res) => {
   }
 });
 
+// URL transformation mappings
+const urlMappings = [
+  { search: ['https://google.com/server11/1:/', 'https://google.com/server12/1:/', 'https://google.com/server13/1:/'], replace: 'https://cloud.sonic-cloud.online/server1/' },
+  { search: ['https://google.com/server21/1:/', 'https://google.com/server22/1:/', 'https://google.com/server23/1:/'], replace: 'https://cloud.sonic-cloud.online/server2/' },
+  { search: ['https://google.com/server3/1:/'], replace: 'https://cloud.sonic-cloud.online/server3/' },
+  { search: ['https://google.com/server4/1:/'], replace: 'https://cloud.sonic-cloud.online/server4/' },
+  { search: ['https://google.com/server5/1:/'], replace: 'https://cloud.sonic-cloud.online/server5/' }
+];
+
+// Transform download URL
+function transformDownloadUrl(originalUrl) {
+  let modifiedUrl = originalUrl;
+  
+  for (const mapping of urlMappings) {
+    for (const searchUrl of mapping.search) {
+      if (originalUrl.includes(searchUrl)) {
+        modifiedUrl = originalUrl.replace(searchUrl, mapping.replace);
+        
+        if (modifiedUrl.includes('.mp4?bot=cscloud2bot&code=')) {
+          modifiedUrl = modifiedUrl.replace('.mp4?bot=cscloud2bot&code=', '?ext=mp4&bot=cscloud2bot&code=');
+        } else if (modifiedUrl.includes('.mp4')) {
+          modifiedUrl = modifiedUrl.replace('.mp4', '?ext=mp4');
+        } else if (modifiedUrl.includes('.mkv?bot=cscloud2bot&code=')) {
+          modifiedUrl = modifiedUrl.replace('.mkv?bot=cscloud2bot&code=', '?ext=mkv&bot=cscloud2bot&code=');
+        } else if (modifiedUrl.includes('.mkv')) {
+          modifiedUrl = modifiedUrl.replace('.mkv', '?ext=mkv');
+        } else if (modifiedUrl.includes('.zip')) {
+          modifiedUrl = modifiedUrl.replace('.zip', '?ext=zip');
+        }
+        
+        return modifiedUrl;
+      }
+    }
+  }
+  
+  return modifiedUrl;
+}
+
+// Download endpoint - FIXED VERSION
+app.get('/download', async (req, res) => {
+  try {
+    const url = req.query.url;
+    if (!url) {
+      return res.status(400).json({ 
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        error: 'Missing URL parameter' 
+      });
+    }
+
+    const response = await axios.get(url, { 
+      headers,
+      maxRedirects: 5
+    });
+    const $ = cheerio.load(response.data);
+
+    let finalLink = null;
+    let rawLink = null;
+    let linkType = 'unknown';
+
+    // Strategy 1: Extract from #link element (highest priority)
+    const linkElement = $('#link');
+    if (linkElement.length > 0) {
+      rawLink = linkElement.attr('href');
+      console.log('Found link in #link element:', rawLink);
+    }
+
+    // Strategy 2: Extract from .wait-done div (skip navigation links)
+    if (!rawLink) {
+      $('.wait-done a').each((i, el) => {
+        const href = $(el).attr('href');
+        const text = $(el).text().trim().toLowerCase();
+        
+        // Skip "back to movie" or "previous" links
+        if (href && 
+            !href.includes('/movies/') && 
+            !href.includes('/tvshows/') && 
+            !text.includes('sinhala') &&
+            !text.includes('previous') &&
+            !text.includes('back')) {
+          rawLink = href;
+          console.log('Found link in .wait-done:', rawLink);
+          return false; // break the loop
+        }
+      });
+    }
+
+    // Strategy 3: Look for any download-related links
+    if (!rawLink) {
+      $('a').each((i, el) => {
+        const href = $(el).attr('href');
+        if (href && (
+          href.includes('google.com/server') || 
+          href.includes('sonic-cloud') ||
+          href.includes('t.me/') ||
+          href.includes('drive.google.com') ||
+          href.includes('mega.nz') ||
+          href.includes('mediafire.com')
+        )) {
+          rawLink = href;
+          console.log('Found link in general search:', rawLink);
+          return false;
+        }
+      });
+    }
+
+    // Process the raw link if found
+    if (rawLink) {
+      // Determine link type and process accordingly
+      if (rawLink.includes('t.me/') || rawLink.includes('telegram')) {
+        linkType = 'telegram';
+        finalLink = rawLink;
+      } else if (rawLink.includes('drive.google.com')) {
+        linkType = 'google_drive';
+        finalLink = rawLink;
+      } else if (rawLink.includes('mega.nz')) {
+        linkType = 'mega';
+        finalLink = rawLink;
+      } else if (rawLink.includes('mediafire.com')) {
+        linkType = 'mediafire';
+        finalLink = rawLink;
+      } else if (rawLink.includes('google.com/server')) {
+        linkType = 'direct';
+        finalLink = transformDownloadUrl(rawLink);
+      } else if (rawLink.includes('sonic-cloud')) {
+        linkType = 'direct';
+        finalLink = rawLink;
+      } else {
+        linkType = 'other';
+        finalLink = rawLink;
+      }
+
+      console.log('Final processed link:', finalLink, 'Type:', linkType);
+    }
+
+    // Strategy 4: Fallback - extract from scripts
+    if (!finalLink) {
+      console.log('Trying script extraction...');
+      const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
+      
+      const patterns = [
+        /href\s*=\s*["']([^"']*sonic-cloud[^"']*)["']/i,
+        /href\s*=\s*["']([^"']*google\.com\/server[^"']*)["']/i,
+        /href\s*=\s*["']([^"']*t\.me\/[^"']*)["']/i,
+        /href\s*=\s*["']([^"']*drive\.google\.com[^"']*)["']/i,
+        /href\s*=\s*["']([^"']*mega\.nz[^"']*)["']/i,
+        /https?:\/\/[^"'\s<>]+sonic-cloud[^"'\s<>]+/i,
+        /https?:\/\/[^"'\s<>]+google\.com\/server[^"'\s<>]+/i
+      ];
+      
+      for (const pattern of patterns) {
+        const linkMatch = scripts.match(pattern);
+        if (linkMatch) {
+          rawLink = linkMatch[1] || linkMatch[0];
+          
+          if (rawLink.includes('t.me')) linkType = 'telegram';
+          else if (rawLink.includes('drive.google')) linkType = 'google_drive';
+          else if (rawLink.includes('mega.nz')) linkType = 'mega';
+          else if (rawLink.includes('google.com/server')) {
+            linkType = 'direct';
+            rawLink = transformDownloadUrl(rawLink);
+          } else if (rawLink.includes('sonic-cloud')) linkType = 'direct';
+          
+          finalLink = rawLink;
+          console.log('Found link in scripts:', finalLink);
+          break;
+        }
+      }
+    }
+
+    // Return response
+    if (finalLink) {
+      res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: true,
+        countdown_url: url,
+        raw_link: rawLink,
+        download_url: finalLink,
+        link_type: linkType,
+        instructions: getLinkTypeInstructions(linkType)
+      });
+    } else {
+      // Debug: Show what links were found
+      const allLinks = $('a').map((i, el) => $(el).attr('href')).get()
+        .filter(h => h && h.startsWith('http'))
+        .slice(0, 10);
+      
+      res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: false,
+        countdown_url: url,
+        message: 'Could not extract download link. The page may use a different structure.',
+        debug_info: {
+          found_links: allLinks,
+          has_link_element: $('#link').length > 0,
+          has_wait_done: $('.wait-done').length > 0
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Download error:', error.message);
+    res.status(500).json({ 
+      developer: API_INFO.developer,
+      version: API_INFO.version,
+      success: false,
+      error: 'Failed to resolve download link', 
+      message: error.message 
+    });
+  }
+});
+
+// Helper function to get instructions based on link type
+function getLinkTypeInstructions(linkType) {
+  const instructions = {
+    telegram: 'Join the Telegram channel/group to access the download',
+    google_drive: 'Open Google Drive link to download the file',
+    mega: 'Open Mega.nz link to download the file',
+    mediafire: 'Open MediaFire link to download the file',
+    direct: 'Direct download link - click to start downloading',
+    other: 'Follow the link to access the download',
+    unknown: 'Follow the link to download'
+  };
+  
+  return instructions[linkType] || instructions.unknown;
+}
+
 // Resolve endpoint
 app.get('/resolve', async (req, res) => {
   try {
@@ -673,181 +710,19 @@ app.get('/resolve', async (req, res) => {
   }
 });
 
-// MAIN DOWNLOAD ENDPOINT - Extracts all download links
-app.get('/download', async (req, res) => {
-  try {
-    const url = req.query.url;
-    if (!url) {
-      return res.status(400).json({ 
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        error: 'Missing URL parameter' 
-      });
-    }
-
-    console.log('📥 Processing countdown URL:', url);
-
-    const response = await axios.get(url, { 
-      headers,
-      maxRedirects: 5,
-      timeout: 15000
-    });
-    const $ = cheerio.load(response.data);
-
-    let rawLink = null;
-    let linkType = 'unknown';
-
-    // Strategy 1: Extract from #link element
-    const linkElement = $('#link');
-    if (linkElement.length > 0) {
-      rawLink = linkElement.attr('href');
-      console.log('✅ Found link in #link element');
-    }
-
-    // Strategy 2: Extract from .wait-done div
-    if (!rawLink) {
-      $('.wait-done a').each((i, el) => {
-        const href = $(el).attr('href');
-        const text = $(el).text().trim().toLowerCase();
-        
-        if (href && 
-            !href.includes('/movies/') && 
-            !href.includes('/tvshows/') && 
-            !text.includes('sinhala') &&
-            !text.includes('previous') &&
-            !text.includes('back')) {
-          rawLink = href;
-          console.log('✅ Found link in .wait-done');
-          return false;
-        }
-      });
-    }
-
-    // Strategy 3: General search
-    if (!rawLink) {
-      $('a').each((i, el) => {
-        const href = $(el).attr('href');
-        if (href && (
-          href.includes('google.com/server') || 
-          href.includes('sonic-cloud') ||
-          href.includes('t.me/') ||
-          href.includes('drive.google.com') ||
-          href.includes('mega.nz')
-        )) {
-          rawLink = href;
-          console.log('✅ Found link in general search');
-          return false;
-        }
-      });
-    }
-
-    if (!rawLink) {
-      return res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: false,
-        countdown_url: url,
-        message: 'Could not extract any download link from countdown page'
-      });
-    }
-
-    // Process based on link type
-    if (rawLink.includes('t.me/')) {
-      return res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        countdown_url: url,
-        link_type: 'telegram',
-        telegram_url: rawLink,
-        instructions: 'Join Telegram channel/group to download'
-      });
-    }
-
-    if (rawLink.includes('drive.google.com')) {
-      return res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        countdown_url: url,
-        link_type: 'google_drive',
-        google_drive_url: rawLink,
-        instructions: 'Open Google Drive link to download'
-      });
-    }
-
-    if (rawLink.includes('mega.nz')) {
-      return res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        countdown_url: url,
-        link_type: 'mega',
-        mega_url: rawLink,
-        instructions: 'Open Mega.nz link to download'
-      });
-    }
-
-    // Transform to sonic-cloud if needed
-    let sonicCloudUrl = rawLink;
-    if (rawLink.includes('google.com/server')) {
-      sonicCloudUrl = transformDownloadUrl(rawLink);
-      console.log('🔄 Transformed to sonic-cloud URL');
-    }
-
-    // Now extract download links from sonic-cloud page
-    console.log('🔍 Extracting links from sonic-cloud page...');
-    const sonicLinks = await extractSonicCloudLinks(sonicCloudUrl);
-
-    if (sonicLinks && (sonicLinks.direct || sonicLinks.google_drive_1 || sonicLinks.telegram)) {
-      return res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        countdown_url: url,
-        raw_link: rawLink,
-        sonic_cloud_page: sonicCloudUrl,
-        
-        file_info: {
-          name: sonicLinks.file_name || 'N/A',
-          size: sonicLinks.file_size || 'N/A'
-        },
-        
-        download_links: {
-          direct_download: sonicLinks.direct,
-          google_drive_1: sonicLinks.google_drive_1,
-          google_drive_2: sonicLinks.google_drive_2,
-          telegram: sonicLinks.telegram
-        },
-        
-        instructions: {
-          direct: 'Fastest - Click to download immediately',
-          google_drive: 'Requires Google sign-in - Can stream or download',
-          telegram: 'Join channel/group to access file'
-        }
-      });
-    } else {
-      // Failed to extract but we have the sonic-cloud page
-      return res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        countdown_url: url,
-        raw_link: rawLink,
-        sonic_cloud_page: sonicCloudUrl,
-        message: 'Could not auto-extract download links. Visit sonic-cloud page manually.',
-        instructions: 'Open the sonic_cloud_page URL in your browser'
-      });
-    }
-
-  } catch (error) {
-    console.error('❌ Download error:', error.message);
-    res.status(500).json({ 
-      developer: API_INFO.developer,
-      version: API_INFO.version,
-      success: false,
-      error: 'Failed to resolve download link', 
-      message: error.message 
-    });
-  }
+// Start server
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`╔════════════════════════════════════════════════════════╗`);
+  console.log(`║  CineSubz API v${API_INFO.version} - by ${API_INFO.developer}           ║`);
+  console.log(`╚════════════════════════════════════════════════════════╝`);
+  console.log(`\n🚀 Server running at: http://0.0.0.0:${PORT}\n`);
+  console.log(`📡 Available Endpoints:`);
+  console.log(`   GET  /                    - API information`);
+  console.log(`   GET  /search?q=           - Search movies/TV shows`);
+  console.log(`   GET  /details?url=        - Get movie/show details`);
+  console.log(`   GET  /episodes?url=       - Get TV show episodes`);
+  console.log(`   GET  /episode-details?url=- Get episode downloads`);
+  console.log(`   GET  /download?url=       - Resolve countdown page`);
+  console.log(`   GET  /resolve?url=        - Follow URL redirects`);
+  console.log(`\n✅ Ready to accept requests!\n`);
 });
