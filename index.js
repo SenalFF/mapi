@@ -3,12 +3,12 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 const BASE_URL = 'https://cinesubz.co';
 
 const API_INFO = {
   developer: 'Mr Senal',
-  version: 'v1.2',
+  version: 'v1.3',
   api_name: 'CineSubz Movie Downloader API'
 };
 
@@ -56,14 +56,8 @@ app.get('/', (req, res) => {
       download: {
         method: 'GET',
         path: '/download?url={countdown_page_url}',
-        description: 'Resolve countdown page and extract download links',
+        description: 'Resolve countdown page to get final download link',
         example: '/download?url=https://cinesubz.co/api-.../odcemnd9hb/'
-      },
-      resolve: {
-        method: 'GET',
-        path: '/resolve?url={url}',
-        description: 'Follow redirects to get final URL',
-        example: '/resolve?url=https://...'
       }
     }
   });
@@ -175,7 +169,7 @@ app.get('/search', async (req, res) => {
   }
 });
 
-// Details endpoint
+// Details endpoint with direct csplayer link detection
 app.get('/details', async (req, res) => {
   try {
     const url = req.query.url;
@@ -211,7 +205,58 @@ app.get('/details', async (req, res) => {
     });
 
     const downloadLinks = [];
+    const directDownloadLinks = [];
 
+    // Look for direct csplayer/download links in the page
+    const pageHtml = response.data;
+    
+    // Pattern 1: csplayer links
+    const csplayerPattern = /https?:\/\/[^"'\s]+\.csplayer\d+\.store\/[^"'\s]+\.(mp4|mkv)/gi;
+    const csplayerMatches = pageHtml.match(csplayerPattern);
+    
+    if (csplayerMatches) {
+      console.log('Found csplayer links:', csplayerMatches.length);
+      csplayerMatches.forEach(link => {
+        const decodedLink = decodeURIComponent(link);
+        const qualityMatch = decodedLink.match(/-(480p|720p|1080p|2160p|4K)\.(mp4|mkv)/i);
+        const quality = qualityMatch ? qualityMatch[1] : 'Unknown';
+        const fileName = decodedLink.split('/').pop();
+        
+        directDownloadLinks.push({
+          quality: quality,
+          type: 'direct',
+          download_url: decodedLink,
+          file_name: fileName
+        });
+      });
+    }
+
+    // Pattern 2: Look for other direct download domains
+    const directLinkPatterns = [
+      /https?:\/\/[^"'\s]+\.(mp4|mkv|avi)/gi
+    ];
+
+    directLinkPatterns.forEach(pattern => {
+      const matches = pageHtml.match(pattern);
+      if (matches) {
+        matches.forEach(link => {
+          if (link.includes('tmdb.org') || link.includes('image')) return;
+          if (directDownloadLinks.some(d => d.download_url === link)) return;
+          
+          const qualityMatch = link.match(/-(480p|720p|1080p|2160p|4K)/i);
+          const quality = qualityMatch ? qualityMatch[1] : 'Unknown';
+          
+          directDownloadLinks.push({
+            quality: quality,
+            type: 'direct',
+            download_url: decodeURIComponent(link),
+            file_name: link.split('/').pop()
+          });
+        });
+      }
+    });
+
+    // Look for countdown/API links (existing functionality)
     $('a').each((i, el) => {
       const $el = $(el);
       const href = $el.attr('href');
@@ -256,6 +301,8 @@ app.get('/details', async (req, res) => {
       countdown_url: d.url
     }));
 
+    const uniqueDirectLinks = [...new Map(directDownloadLinks.map(l => [l.download_url, l])).values()];
+
     res.json({
       developer: API_INFO.developer,
       version: API_INFO.version,
@@ -272,6 +319,7 @@ app.get('/details', async (req, res) => {
       poster_url: poster || null,
       movie_url: url,
       
+      direct_downloads: uniqueDirectLinks.length > 0 ? uniqueDirectLinks : null,
       download_links: formattedDownloads
     });
   } catch (error) {
@@ -428,7 +476,6 @@ const urlMappings = [
   { search: ['https://google.com/server5/1:/'], replace: 'https://cloud.sonic-cloud.online/server5/' }
 ];
 
-// Transform download URL
 function transformDownloadUrl(originalUrl) {
   let modifiedUrl = originalUrl;
   let urlChanged = false;
@@ -457,7 +504,6 @@ function transformDownloadUrl(originalUrl) {
     }
   }
 
-  // Telegram replacements
   if (!urlChanged) {
     let tempUrl = originalUrl;
     if (tempUrl.includes('srilank222')) {
@@ -480,12 +526,9 @@ function transformDownloadUrl(originalUrl) {
 // Helper function to extract file info from sonic-cloud page
 async function extractSonicCloudLinks(sonicCloudUrl) {
   try {
-    console.log('🔍 Fetching sonic-cloud page:', sonicCloudUrl);
+    console.log('Fetching sonic-cloud page:', sonicCloudUrl);
     const response = await axios.get(sonicCloudUrl, { 
-      headers: {
-        ...headers,
-        'Referer': 'https://cinesubz.lk/'
-      },
+      headers,
       maxRedirects: 5,
       timeout: 15000
     });
@@ -493,15 +536,10 @@ async function extractSonicCloudLinks(sonicCloudUrl) {
     const $ = cheerio.load(response.data);
 
     const downloadLinks = {
-      direct: null,
-      google_drive_1: null,
-      google_drive_2: null,
-      telegram: null,
       file_name: null,
       file_size: null
     };
 
-    // Extract file info from .file-info elements
     $('.file-info').each((i, el) => {
       const $el = $(el);
       const text = $el.text();
@@ -514,42 +552,14 @@ async function extractSonicCloudLinks(sonicCloudUrl) {
       }
     });
 
-    console.log('✅ File info extracted:', {
-      fileName: downloadLinks.file_name,
-      fileSize: downloadLinks.file_size
-    });
-
     return downloadLinks;
   } catch (error) {
-    console.error('❌ Error extracting sonic-cloud info:', error.message);
-    return {
-      direct: null,
-      google_drive_1: null,
-      google_drive_2: null,
-      telegram: null,
-      file_name: null,
-      file_size: null
-    };
+    console.error('Error extracting sonic-cloud info:', error.message);
+    return { file_name: null, file_size: null };
   }
 }
 
-// Helper function to get instructions based on link type
-function getLinkTypeInstructions(linkType) {
-  const instructions = {
-    telegram: 'Join the Telegram channel/group to access the download',
-    google_drive: 'Open Google Drive link to download the file',
-    mega: 'Open Mega.nz link to download the file',
-    mediafire: 'Open MediaFire link to download the file',
-    sonic_cloud_page: 'Visit the sonic-cloud page to access all download options (Direct, Google Drive, Telegram)',
-    direct: 'Direct download link - click to start downloading',
-    other: 'Follow the link to access the download',
-    unknown: 'Follow the link to download'
-  };
-  
-  return instructions[linkType] || instructions.unknown;
-}
-
-// MAIN DOWNLOAD ENDPOINT
+// Download endpoint - Direct extraction without sonic-cloud
 app.get('/download', async (req, res) => {
   try {
     const url = req.query.url;
@@ -561,23 +571,22 @@ app.get('/download', async (req, res) => {
       });
     }
 
-    console.log('📥 Processing countdown URL:', url);
-
     const response = await axios.get(url, { 
-      headers,
-      maxRedirects: 5,
-      timeout: 15000
+      headers, 
+      timeout: 15000, 
+      maxRedirects: 5 
     });
     const $ = cheerio.load(response.data);
+    const pageHtml = response.data;
 
     let rawLink = null;
-    let linkType = 'unknown';
+    const downloadOptions = [];
 
     // Strategy 1: Extract from #link element
     const linkElement = $('#link');
     if (linkElement.length > 0) {
       rawLink = linkElement.attr('href');
-      console.log('✅ Found link in #link element');
+      console.log('Found link in #link element');
     }
 
     // Strategy 2: Extract from .wait-done div
@@ -593,7 +602,7 @@ app.get('/download', async (req, res) => {
             !text.includes('previous') &&
             !text.includes('back')) {
           rawLink = href;
-          console.log('✅ Found link in .wait-done');
+          console.log('Found link in .wait-done');
           return false;
         }
       });
@@ -605,29 +614,67 @@ app.get('/download', async (req, res) => {
         const href = $(el).attr('href');
         if (href && (
           href.includes('google.com/server') || 
-          href.includes('sonic-cloud') ||
+          href.includes('csplayer') ||
           href.includes('t.me/') ||
           href.includes('drive.google.com') ||
           href.includes('mega.nz')
         )) {
           rawLink = href;
-          console.log('✅ Found link in general search');
+          console.log('Found link in general search');
           return false;
         }
       });
     }
 
+    // Strategy 4: Look for csplayer direct links in page HTML
+    const csplayerPattern = /https?:\/\/[^"'\s]+\.csplayer\d+\.store\/[^"'\s]+\.(mp4|mkv)/gi;
+    const csplayerMatches = pageHtml.match(csplayerPattern);
+    
+    if (csplayerMatches && csplayerMatches.length > 0) {
+      console.log('Found csplayer direct links:', csplayerMatches.length);
+      
+      csplayerMatches.forEach(link => {
+        const decodedLink = decodeURIComponent(link);
+        const qualityMatch = decodedLink.match(/-(480p|720p|1080p|2160p|4K)\.(mp4|mkv)/i);
+        const quality = qualityMatch ? qualityMatch[1] : 'Unknown';
+        const fileName = decodedLink.split('/').pop();
+        
+        downloadOptions.push({
+          quality: quality,
+          type: 'csplayer_direct',
+          download_url: decodedLink,
+          file_name: fileName
+        });
+      });
+
+      // Remove duplicates
+      const uniqueOptions = [...new Map(downloadOptions.map(d => [d.download_url, d])).values()];
+
+      return res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: true,
+        countdown_url: url,
+        link_type: 'csplayer_direct',
+        total_links: uniqueOptions.length,
+        download_options: uniqueOptions,
+        message: 'Direct csplayer download links extracted successfully',
+        instructions: 'Click any download_url to start downloading directly'
+      });
+    }
+
+    // If direct csplayer links not found, process other link types
     if (!rawLink) {
       return res.json({
         developer: API_INFO.developer,
         version: API_INFO.version,
         success: false,
         countdown_url: url,
-        message: 'Could not extract any download link from countdown page'
+        message: 'Could not extract download links from this page'
       });
     }
 
-    // Process based on link type
+    // Handle Telegram links
     if (rawLink.includes('t.me/')) {
       return res.json({
         developer: API_INFO.developer,
@@ -636,10 +683,11 @@ app.get('/download', async (req, res) => {
         countdown_url: url,
         link_type: 'telegram',
         download_url: rawLink,
-        instructions: getLinkTypeInstructions('telegram')
+        instructions: 'Join Telegram channel/group to access the download'
       });
     }
 
+    // Handle Google Drive links
     if (rawLink.includes('drive.google.com')) {
       return res.json({
         developer: API_INFO.developer,
@@ -648,10 +696,11 @@ app.get('/download', async (req, res) => {
         countdown_url: url,
         link_type: 'google_drive',
         download_url: rawLink,
-        instructions: getLinkTypeInstructions('google_drive')
+        instructions: 'Open Google Drive link to download the file'
       });
     }
 
+    // Handle Mega links
     if (rawLink.includes('mega.nz')) {
       return res.json({
         developer: API_INFO.developer,
@@ -660,134 +709,61 @@ app.get('/download', async (req, res) => {
         countdown_url: url,
         link_type: 'mega',
         download_url: rawLink,
-        instructions: getLinkTypeInstructions('mega')
+        instructions: 'Open Mega.nz link to download the file'
       });
     }
 
-    // Transform to sonic-cloud if needed
-    let sonicCloudUrl = rawLink;
+    // If it's a google.com/server link, transform it but don't fetch
     if (rawLink.includes('google.com/server')) {
-      sonicCloudUrl = transformDownloadUrl(rawLink);
-      console.log('🔄 Transformed to sonic-cloud URL');
+      const transformedUrl = transformDownloadUrl(rawLink);
+      
+      return res.json({
+        developer: API_INFO.developer,
+        version: API_INFO.version,
+        success: true,
+        countdown_url: url,
+        raw_link: rawLink,
+        link_type: 'server_redirect',
+        server_page: transformedUrl,
+        message: 'Server redirect link - visit page to access download options',
+        instructions: 'Open the server_page URL in your browser to access download buttons'
+      });
     }
 
-    // Extract file info from sonic-cloud page
-    console.log('🔍 Extracting info from sonic-cloud page...');
-    const sonicInfo = await extractSonicCloudLinks(sonicCloudUrl);
-
+    // Default response for other link types
     return res.json({
       developer: API_INFO.developer,
       version: API_INFO.version,
       success: true,
       countdown_url: url,
-      raw_link: rawLink,
-      link_type: 'sonic_cloud_page',
-      sonic_cloud_page: sonicCloudUrl,
-      
-      file_info: {
-        name: sonicInfo.file_name || 'N/A',
-        size: sonicInfo.file_size || 'N/A'
-      },
-      
-      message: 'Open the sonic-cloud page in your browser to access download buttons',
-      instructions: 'The sonic-cloud page provides multiple download options: Direct Download, Google Drive (1 & 2), and Telegram. Click the sonic_cloud_page URL to access these options.',
-      
-      note: 'Download links are protected by JavaScript encryption and cannot be extracted directly. Visit the page to access download buttons.'
+      link_type: 'other',
+      download_url: rawLink,
+      instructions: 'Follow the link to access download'
     });
 
   } catch (error) {
-    console.error('❌ Download error:', error.message);
+    console.error('Download error:', error.message);
     res.status(500).json({ 
       developer: API_INFO.developer,
       version: API_INFO.version,
       success: false,
-      error: 'Failed to resolve download link', 
+      error: 'Download resolution failed', 
       message: error.message 
     });
   }
 });
 
-// Resolve endpoint
-app.get('/resolve', async (req, res) => {
-  try {
-    const url = req.query.url;
-    if (!url) {
-      return res.status(400).json({ 
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        error: 'Missing URL parameter' 
-      });
-    }
-
-    const response = await axios.get(url, { 
-      headers,
-      maxRedirects: 0,
-      validateStatus: (status) => status < 400 || status === 302 || status === 301
-    });
-
-    const location = response.headers.location;
-    
-    if (location) {
-      res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        originalUrl: url,
-        redirectUrl: location
-      });
-    } else {
-      const $ = cheerio.load(response.data);
-      const scripts = $('script').map((i, el) => $(el).html()).get().join('\n');
-      
-      const linkMatch = scripts.match(/https?:\/\/[^"'\s<>]+(?:sonic-cloud|drive|mega)[^"'\s<>]+/i);
-      
-      res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: !!linkMatch,
-        originalUrl: url,
-        extractedLink: linkMatch ? linkMatch[0] : null
-      });
-    }
-  } catch (error) {
-    if (error.response && error.response.headers.location) {
-      res.json({
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        success: true,
-        originalUrl: req.query.url,
-        redirectUrl: error.response.headers.location
-      });
-    } else {
-      console.error('Resolve error:', error.message);
-      res.status(500).json({ 
-        developer: API_INFO.developer,
-        version: API_INFO.version,
-        error: 'Failed to resolve URL', 
-        message: error.message 
-      });
-    }
-  }
-});
-
-// Start server (for local development)
+// Start server (local development)
 if (process.env.NODE_ENV !== 'production') {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`╔════════════════════════════════════════════════════════╗`);
     console.log(`║  CineSubz API v${API_INFO.version} - by ${API_INFO.developer}         ║`);
     console.log(`╚════════════════════════════════════════════════════════╝`);
     console.log(`\n🚀 Server running at: http://0.0.0.0:${PORT}\n`);
-    console.log(`📡 Available Endpoints:`);
-    console.log(`   GET  /                    - API information`);
-    console.log(`   GET  /search?q=           - Search movies/TV shows`);
-    console.log(`   GET  /details?url=        - Get movie/show details`);
-    console.log(`   GET  /episodes?url=       - Get TV show episodes`);
-    console.log(`   GET  /episode-details?url=- Get episode downloads`);
-    console.log(`   GET  /download?url=       - Extract download info`);
-    console.log(`   GET  /resolve?url=        - Follow URL redirects`);
+    console.log(`📡 Endpoints: /search, /details, /episodes, /download`);
     console.log(`\n✅ Ready to accept requests!\n`);
   });
 }
 
-// Export for Vercel serverless
+// Export for serverless (Vercel)
 module.exports = app;
